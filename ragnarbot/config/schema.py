@@ -5,13 +5,6 @@ from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
 
 
-class WhatsAppConfig(BaseModel):
-    """WhatsApp channel configuration."""
-    enabled: bool = False
-    bridge_url: str = "ws://localhost:3001"
-    allow_from: list[str] = Field(default_factory=list)  # Allowed phone numbers
-
-
 class TelegramConfig(BaseModel):
     """Telegram channel configuration."""
     enabled: bool = False
@@ -20,21 +13,9 @@ class TelegramConfig(BaseModel):
     proxy: str | None = None  # HTTP/SOCKS5 proxy URL, e.g. "http://127.0.0.1:7890" or "socks5://127.0.0.1:1080"
 
 
-class FeishuConfig(BaseModel):
-    """Feishu/Lark channel configuration using WebSocket long connection."""
-    enabled: bool = False
-    app_id: str = ""  # App ID from Feishu Open Platform
-    app_secret: str = ""  # App Secret from Feishu Open Platform
-    encrypt_key: str = ""  # Encrypt Key for event subscription (optional)
-    verification_token: str = ""  # Verification Token for event subscription (optional)
-    allow_from: list[str] = Field(default_factory=list)  # Allowed user open_ids
-
-
 class ChannelsConfig(BaseModel):
     """Configuration for chat channels."""
-    whatsapp: WhatsAppConfig = Field(default_factory=WhatsAppConfig)
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
-    feishu: FeishuConfig = Field(default_factory=FeishuConfig)
 
 
 class AgentDefaults(BaseModel):
@@ -61,12 +42,12 @@ class ProvidersConfig(BaseModel):
     """Configuration for LLM providers."""
     anthropic: ProviderConfig = Field(default_factory=ProviderConfig)
     openai: ProviderConfig = Field(default_factory=ProviderConfig)
-    openrouter: ProviderConfig = Field(default_factory=ProviderConfig)
-    deepseek: ProviderConfig = Field(default_factory=ProviderConfig)
-    groq: ProviderConfig = Field(default_factory=ProviderConfig)
-    zhipu: ProviderConfig = Field(default_factory=ProviderConfig)
-    vllm: ProviderConfig = Field(default_factory=ProviderConfig)
     gemini: ProviderConfig = Field(default_factory=ProviderConfig)
+
+
+class TranscriptionConfig(BaseModel):
+    """Voice transcription configuration (Groq Whisper)."""
+    api_key: str = ""  # Groq API key for Whisper
 
 
 class GatewayConfig(BaseModel):
@@ -103,6 +84,7 @@ class Config(BaseSettings):
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
+    transcription: TranscriptionConfig = Field(default_factory=TranscriptionConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     
@@ -112,27 +94,19 @@ class Config(BaseSettings):
         return Path(self.agents.defaults.workspace).expanduser()
     
     def get_api_key(self) -> str | None:
-        """Get API key in priority order: OpenRouter > DeepSeek > Anthropic > OpenAI > Gemini > Zhipu > Groq > vLLM."""
+        """Get API key in priority order: Anthropic > OpenAI > Gemini."""
         return (
-            self.providers.openrouter.api_key or
-            self.providers.deepseek.api_key or
             self.providers.anthropic.api_key or
             self.providers.openai.api_key or
             self.providers.gemini.api_key or
-            self.providers.zhipu.api_key or
-            self.providers.groq.api_key or
-            self.providers.vllm.api_key or
             None
         )
-    
+
     def get_api_base(self) -> str | None:
-        """Get API base URL if using OpenRouter, Zhipu or vLLM."""
-        if self.providers.openrouter.api_key:
-            return self.providers.openrouter.api_base or "https://openrouter.ai/api/v1"
-        if self.providers.zhipu.api_key:
-            return self.providers.zhipu.api_base
-        if self.providers.vllm.api_base:
-            return self.providers.vllm.api_base
+        """Get API base URL if a provider has a custom base configured."""
+        for provider in [self.providers.anthropic, self.providers.openai, self.providers.gemini]:
+            if provider.api_base:
+                return provider.api_base
         return None
     
     class Config:
