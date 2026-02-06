@@ -96,43 +96,9 @@ def main(
 
 @app.command()
 def onboard():
-    """Initialize ragnarbot configuration and workspace."""
-    from ragnarbot.config.loader import get_config_path, save_config
-    from ragnarbot.config.schema import Config
-    from ragnarbot.auth.credentials import Credentials, get_credentials_path, save_credentials
-    from ragnarbot.utils.helpers import get_workspace_path
-
-    config_path = get_config_path()
-    creds_path = get_credentials_path()
-
-    if config_path.exists():
-        console.print(f"[yellow]Config already exists at {config_path}[/yellow]")
-        if not typer.confirm("Overwrite?"):
-            raise typer.Exit()
-
-    # Create default config
-    config = Config()
-    save_config(config)
-    console.print(f"[green]✓[/green] Created config at {config_path}")
-
-    # Create default credentials
-    if not creds_path.exists():
-        save_credentials(Credentials(), creds_path)
-        console.print(f"[green]✓[/green] Created credentials at {creds_path}")
-
-    # Create workspace
-    workspace = get_workspace_path()
-    console.print(f"[green]✓[/green] Created workspace at {workspace}")
-
-    # Create default bootstrap files
-    _create_workspace_templates(workspace)
-
-    console.print(f"\n{__logo__} ragnarbot is ready!")
-    console.print("\nNext steps:")
-    console.print("  1. Add your API key to [cyan]~/.ragnarbot/credentials.json[/cyan]")
-    console.print("     Get one at: https://console.anthropic.com/keys")
-    console.print("  2. Chat: [cyan]ragnarbot agent -m \"Hello!\"[/cyan]")
-    console.print("\n[dim]Want Telegram? See: https://github.com/BlckLvls/ragnarbot#-chat-apps[/dim]")
+    """Interactive setup wizard for ragnarbot."""
+    from ragnarbot.cli.tui import run_onboarding
+    run_onboarding(console)
 
 
 
