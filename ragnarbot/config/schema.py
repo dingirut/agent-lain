@@ -23,7 +23,7 @@ OAUTH_SUPPORTED_PROVIDERS = {"anthropic"}
 class AgentDefaults(BaseModel):
     """Default agent configuration."""
     workspace: str = "~/.ragnarbot/workspace"
-    model: str = "anthropic/claude-opus-4-5"
+    model: str = "anthropic/claude-opus-4-6"
     max_tokens: int = 8192
     temperature: float = 0.7
     max_tool_iterations: int = 20
