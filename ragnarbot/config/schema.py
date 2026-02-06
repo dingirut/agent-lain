@@ -5,13 +5,6 @@ from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
 
 
-class WhatsAppConfig(BaseModel):
-    """WhatsApp channel configuration."""
-    enabled: bool = False
-    bridge_url: str = "ws://localhost:3001"
-    allow_from: list[str] = Field(default_factory=list)  # Allowed phone numbers
-
-
 class TelegramConfig(BaseModel):
     """Telegram channel configuration."""
     enabled: bool = False
@@ -32,7 +25,6 @@ class FeishuConfig(BaseModel):
 
 class ChannelsConfig(BaseModel):
     """Configuration for chat channels."""
-    whatsapp: WhatsAppConfig = Field(default_factory=WhatsAppConfig)
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
     feishu: FeishuConfig = Field(default_factory=FeishuConfig)
 

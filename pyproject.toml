@@ -21,8 +21,6 @@ dependencies = [
     "litellm>=1.0.0",
     "pydantic>=2.0.0",
     "pydantic-settings>=2.0.0",
-    "websockets>=12.0",
-    "websocket-client>=1.6.0",
     "httpx>=0.25.0",
     "loguru>=0.7.0",
     "readability-lxml>=0.8.0",
@@ -65,13 +63,9 @@ include = [
 [tool.hatch.build.targets.sdist]
 include = [
     "ragnarbot/",
-    "bridge/",
     "README.md",
     "LICENSE",
 ]
-
-[tool.hatch.build.targets.wheel.force-include]
-"bridge" = "ragnarbot/bridge"
 
 [tool.ruff]
 line-length = 100
