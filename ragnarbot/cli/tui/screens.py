@@ -3,8 +3,8 @@
 import httpx
 from rich.console import Console
 
-from ragnarbot.config.providers import PROVIDERS, get_provider, get_models, supports_oauth
-from ragnarbot.cli.tui.components import select_menu, text_input, info_screen
+from ragnarbot.cli.tui.components import info_screen, select_menu, text_input
+from ragnarbot.config.providers import PROVIDERS, get_models, get_provider
 
 
 def provider_screen(console: Console) -> int | None:
@@ -109,8 +109,8 @@ def _validate_telegram_token(console: Console, token: str) -> str | None:
                 console,
                 "Bot verified",
                 [
-                    f"[green]Bot connected successfully![/green]",
-                    f"",
+                    "[green]Bot connected successfully![/green]",
+                    "",
                     f"Name: [bold]{bot_name}[/bold]",
                     f"Username: @{bot_username}",
                 ],

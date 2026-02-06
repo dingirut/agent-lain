@@ -6,10 +6,9 @@ from typing import Any
 
 from rich.console import Console
 
-from ragnarbot.config.loader import convert_keys, convert_to_camel
-from ragnarbot.config.schema import Config
 from ragnarbot.auth.credentials import Credentials
-
+from ragnarbot.config.loader import convert_keys
+from ragnarbot.config.schema import Config
 
 # Paths that contain sensitive data (warn before removing)
 SENSITIVE_PATHS = {"providers", "api_key", "oauth_key", "bot_token", "api_key_url"}

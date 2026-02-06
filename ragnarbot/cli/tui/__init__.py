@@ -2,14 +2,14 @@
 
 from rich.console import Console
 
-from ragnarbot.cli.tui.components import QuitOnboarding, clear_screen
+from ragnarbot.cli.tui.components import QuitOnboardingError, clear_screen
 from ragnarbot.cli.tui.screens import (
-    provider_screen,
     auth_method_screen,
-    token_input_screen,
     model_screen,
-    telegram_screen,
+    provider_screen,
     summary_screen,
+    telegram_screen,
+    token_input_screen,
 )
 from ragnarbot.config.providers import PROVIDERS, get_models, get_provider, supports_oauth
 
@@ -18,7 +18,7 @@ def run_onboarding(console: Console) -> None:
     """Run the full onboarding wizard."""
     try:
         _onboarding_loop(console)
-    except QuitOnboarding:
+    except QuitOnboardingError:
         clear_screen(console)
         console.print("\n  Setup cancelled.\n")
     except KeyboardInterrupt:
@@ -42,7 +42,7 @@ def _onboarding_loop(console: Console) -> None:
             provider_idx = provider_screen(console)
             if provider_idx is None:
                 # Quit from first screen
-                raise QuitOnboarding()
+                raise QuitOnboardingError()
             step = 2
 
         elif step == 2:
@@ -124,12 +124,12 @@ def _save_results(
     telegram_token: str,
 ) -> None:
     """Save onboarding results to config and credentials files."""
-    from ragnarbot.config.loader import load_config, save_config, get_config_path
     from ragnarbot.auth.credentials import (
+        get_credentials_path,
         load_credentials,
         save_credentials,
-        get_credentials_path,
     )
+    from ragnarbot.config.loader import get_config_path, load_config, save_config
     from ragnarbot.utils.helpers import get_workspace_path
 
     # Load existing or create new

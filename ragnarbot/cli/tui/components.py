@@ -1,13 +1,12 @@
 """Reusable TUI widgets for onboarding screens."""
 
 from rich.console import Console
-from rich.text import Text
 
 from ragnarbot import __logo__
 from ragnarbot.cli.tui.keys import Key, get_key_reader
 
 
-class QuitOnboarding(Exception):
+class QuitOnboardingError(Exception):
     """Raised when user presses Q to quit."""
     pass
 
@@ -57,7 +56,7 @@ def select_menu(
         Selected index, or None if user pressed Esc (back)
 
     Raises:
-        QuitOnboarding: If user pressed Q to quit
+        QuitOnboardingError: If user pressed Q to quit
     """
     read = get_key_reader()
 
@@ -83,7 +82,7 @@ def select_menu(
         elif key == Key.ESC:
             return None
         elif key == Key.CHAR and char.lower() == "q":
-            raise QuitOnboarding()
+            raise QuitOnboardingError()
 
 
 def text_input(
@@ -110,7 +109,7 @@ def text_input(
         Input string, "" if skipped (allow_empty), or None if Esc (back)
 
     Raises:
-        QuitOnboarding: If user pressed Q to quit (only when buffer empty)
+        QuitOnboardingError: If user pressed Q to quit (only when buffer empty)
     """
     read = get_key_reader()
     buffer = ""
@@ -153,7 +152,7 @@ def text_input(
             return None
         elif key == Key.CHAR:
             if char.lower() == "q" and not buffer:
-                raise QuitOnboarding()
+                raise QuitOnboardingError()
             else:
                 buffer += char
 
@@ -169,7 +168,7 @@ def info_screen(
     Returns True on Enter, False on Esc.
 
     Raises:
-        QuitOnboarding: If user pressed Q to quit
+        QuitOnboardingError: If user pressed Q to quit
     """
     read = get_key_reader()
 
@@ -187,4 +186,4 @@ def info_screen(
         elif key == Key.ESC:
             return False
         elif key == Key.CHAR and char.lower() == "q":
-            raise QuitOnboarding()
+            raise QuitOnboardingError()

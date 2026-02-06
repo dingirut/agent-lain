@@ -9,7 +9,7 @@ from rich.console import Console
 
 from ragnarbot.cli.tui.keys import Key, set_key_reader, clear_key_reader
 from ragnarbot.cli.tui import run_onboarding
-from ragnarbot.cli.tui.components import QuitOnboarding
+from ragnarbot.cli.tui.components import QuitOnboardingError
 from ragnarbot.config.schema import Config
 from ragnarbot.auth.credentials import Credentials
 

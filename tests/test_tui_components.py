@@ -9,7 +9,7 @@ from ragnarbot.cli.tui.components import (
     select_menu,
     text_input,
     info_screen,
-    QuitOnboarding,
+    QuitOnboardingError,
 )
 
 
@@ -83,7 +83,7 @@ class TestSelectMenu:
             (Key.CHAR, "q"),
         ]))
         con = make_console()
-        with pytest.raises(QuitOnboarding):
+        with pytest.raises(QuitOnboardingError):
             select_menu(con, "Pick", [("A", "a")])
 
     def test_capital_q_raises_quit(self):
@@ -91,7 +91,7 @@ class TestSelectMenu:
             (Key.CHAR, "Q"),
         ]))
         con = make_console()
-        with pytest.raises(QuitOnboarding):
+        with pytest.raises(QuitOnboardingError):
             select_menu(con, "Pick", [("A", "a")])
 
 
@@ -158,7 +158,7 @@ class TestTextInput:
             (Key.CHAR, "q"),
         ]))
         con = make_console()
-        with pytest.raises(QuitOnboarding):
+        with pytest.raises(QuitOnboardingError):
             text_input(con, "Input", "Name")
 
 
@@ -184,5 +184,5 @@ class TestInfoScreen:
             (Key.CHAR, "q"),
         ]))
         con = make_console()
-        with pytest.raises(QuitOnboarding):
+        with pytest.raises(QuitOnboardingError):
             info_screen(con, "Info", ["line1"])

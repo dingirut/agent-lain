@@ -41,9 +41,9 @@ def read_key() -> tuple[Key, str]:
     Returns (Key, char_value) where char_value is the actual character
     for Key.CHAR events, empty string otherwise.
     """
-    import tty
-    import termios
     import select
+    import termios
+    import tty
 
     fd = sys.stdin.fileno()
     old_settings = termios.tcgetattr(fd)
