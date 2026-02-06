@@ -51,7 +51,7 @@ def token_input_screen(
         "Enter your credentials",
         prompt,
         hint=hint,
-        secret=True,
+        secret=False,
         subtitle=f"Step 3 of 5 — {provider['name']}",
     )
 
