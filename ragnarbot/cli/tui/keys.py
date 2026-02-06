@@ -17,6 +17,9 @@ class Key(Enum):
 # Injectable key reader for testing
 _key_reader = None
 
+# Buffer for pasted characters (drained from fd before leaving raw mode)
+_input_buffer: list[tuple[Key, str]] = []
+
 
 def set_key_reader(fn):
     """Set a custom key reader function (for testing)."""
@@ -35,15 +38,33 @@ def get_key_reader():
     return _key_reader or read_key
 
 
+def _byte_to_key(ch: str) -> tuple[Key, str]:
+    """Convert a single character to a Key event."""
+    if ch == "\r" or ch == "\n":
+        return (Key.ENTER, "")
+    if ch == "\x7f" or ch == "\x08":
+        return (Key.BACKSPACE, "")
+    if ch == "\x03":
+        raise KeyboardInterrupt
+    return (Key.CHAR, ch)
+
+
 def read_key() -> tuple[Key, str]:
     """Read a single keypress from stdin.
 
     Returns (Key, char_value) where char_value is the actual character
     for Key.CHAR events, empty string otherwise.
 
-    Uses os.read() on the raw fd to avoid Python's buffered I/O
-    swallowing escape sequence bytes.
+    On paste (multiple bytes available at once), all bytes are drained
+    from the fd while still in raw mode and buffered. Subsequent calls
+    return from the buffer without re-entering raw mode.
     """
+    global _input_buffer
+
+    # Return buffered keys first (from a previous paste)
+    if _input_buffer:
+        return _input_buffer.pop(0)
+
     import os
     import select
     import termios
@@ -58,32 +79,29 @@ def read_key() -> tuple[Key, str]:
 
         if ch == "\x1b":
             # Could be ESC or start of arrow/escape sequence
-            # Wait briefly to see if more bytes follow on the fd
             if select.select([fd], [], [], 0.05)[0]:
                 seq = os.read(fd, 2)
                 if seq == b"[A":
                     return (Key.UP, "")
                 elif seq == b"[B":
                     return (Key.DOWN, "")
-                # Unknown escape sequence — consume and treat as ESC
                 return (Key.ESC, "")
             return (Key.ESC, "")
 
-        if ch == "\r" or ch == "\n":
-            return (Key.ENTER, "")
+        first = _byte_to_key(ch)
 
-        if ch == "\x7f" or ch == "\x08":
-            return (Key.BACKSPACE, "")
+        # Drain any remaining bytes (paste buffer) while still in raw mode
+        while select.select([fd], [], [], 0)[0]:
+            more_b = os.read(fd, 1)
+            more_ch = more_b.decode("utf-8", errors="replace")
+            if more_ch == "\x1b":
+                # Skip escape sequences embedded in paste
+                if select.select([fd], [], [], 0.01)[0]:
+                    os.read(fd, 2)
+                continue
+            _input_buffer.append(_byte_to_key(more_ch))
 
-        if ch == "\x03":
-            # Ctrl+C
-            raise KeyboardInterrupt
-
-        if ord(ch) < 32:
-            # Other control characters
-            return (Key.CHAR, ch)
-
-        return (Key.CHAR, ch)
+        return first
 
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
