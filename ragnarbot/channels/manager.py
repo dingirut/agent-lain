@@ -16,7 +16,7 @@ class ChannelManager:
     Manages chat channels and coordinates message routing.
     
     Responsibilities:
-    - Initialize enabled channels (Telegram, WhatsApp, etc.)
+    - Initialize enabled channels (Telegram)
     - Start/stop channels
     - Route outbound messages
     """
@@ -45,16 +45,6 @@ class ChannelManager:
             except ImportError as e:
                 logger.warning(f"Telegram channel not available: {e}")
         
-        # Feishu channel
-        if self.config.channels.feishu.enabled:
-            try:
-                from ragnarbot.channels.feishu import FeishuChannel
-                self.channels["feishu"] = FeishuChannel(
-                    self.config.channels.feishu, self.bus
-                )
-                logger.info("Feishu channel enabled")
-            except ImportError as e:
-                logger.warning(f"Feishu channel not available: {e}")
     
     async def start_all(self) -> None:
         """Start all channels and the outbound dispatcher."""
