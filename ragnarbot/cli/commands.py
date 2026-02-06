@@ -32,8 +32,8 @@ def _resolve_provider_auth(config, creds):
     api_key = None
 
     if provider_creds:
-        if auth_method == "oauth" and provider_creds.oauth.access_token:
-            oauth_token = provider_creds.oauth.access_token
+        if auth_method == "oauth" and provider_creds.oauth_key:
+            oauth_token = provider_creds.oauth_key
         elif provider_creds.api_key:
             api_key = provider_creds.api_key
 
@@ -67,7 +67,7 @@ def _validate_auth(config, creds):
     if auth_method == "api_key" and not provider_creds.api_key:
         return f"No API key configured for '{provider_name}'. Set it in ~/.ragnarbot/credentials.json"
 
-    if auth_method == "oauth" and not provider_creds.oauth.access_token:
+    if auth_method == "oauth" and not provider_creds.oauth_key:
         return f"No OAuth token for '{provider_name}'. Run: claude setup-token"
 
     return None
@@ -655,7 +655,7 @@ def status():
 
         for name in ("anthropic", "openai", "gemini"):
             pc = getattr(creds.providers, name)
-            if name == provider_name and auth_method == "oauth" and pc.oauth.access_token:
+            if name == provider_name and auth_method == "oauth" and pc.oauth_key:
                 auth_info = "[green]oauth[/green]"
             elif pc.api_key:
                 auth_info = "[green]api_key[/green]"

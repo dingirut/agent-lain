@@ -15,7 +15,7 @@ def test_default_credentials():
     """Default credentials have empty values."""
     creds = Credentials()
     assert creds.providers.anthropic.api_key == ""
-    assert creds.providers.anthropic.oauth.access_token == ""
+    assert creds.providers.anthropic.oauth_key == ""
     assert creds.services.transcription.api_key == ""
     assert creds.channels.telegram.bot_token == ""
 
@@ -25,7 +25,7 @@ def test_save_load_round_trip(tmp_path):
     path = tmp_path / "credentials.json"
 
     creds = Credentials()
-    creds.providers.anthropic.oauth.access_token = "sk-ant-oat-test"
+    creds.providers.anthropic.oauth_key = "sk-ant-oat-test"
     creds.providers.openai.api_key = "sk-openai-test"
     creds.services.web_search.api_key = "brave-key"
     creds.channels.telegram.bot_token = "bot123:ABC"
@@ -33,7 +33,7 @@ def test_save_load_round_trip(tmp_path):
     save_credentials(creds, path)
     loaded = load_credentials(path)
 
-    assert loaded.providers.anthropic.oauth.access_token == "sk-ant-oat-test"
+    assert loaded.providers.anthropic.oauth_key == "sk-ant-oat-test"
     assert loaded.providers.openai.api_key == "sk-openai-test"
     assert loaded.services.web_search.api_key == "brave-key"
     assert loaded.channels.telegram.bot_token == "bot123:ABC"
@@ -53,7 +53,7 @@ def test_camel_case_serialization(tmp_path):
     path = tmp_path / "credentials.json"
 
     creds = Credentials()
-    creds.providers.anthropic.oauth.access_token = "tok"
+    creds.providers.anthropic.oauth_key = "tok"
     creds.services.web_search.api_key = "key"
     creds.channels.telegram.bot_token = "bot"
 
@@ -64,7 +64,7 @@ def test_camel_case_serialization(tmp_path):
 
     # Top-level keys should be camelCase
     assert "providers" in raw
-    assert "accessToken" in raw["providers"]["anthropic"]["oauth"]
+    assert "oauthKey" in raw["providers"]["anthropic"]
     assert "webSearch" in raw["services"]
     assert "botToken" in raw["channels"]["telegram"]
 

@@ -7,17 +7,10 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 
-class OAuthCredentials(BaseModel):
-    """OAuth token credentials."""
-    access_token: str = ""
-    refresh_token: str = ""
-    expires_at: int = 0
-
-
 class ProviderCredentials(BaseModel):
     """Credentials for a single LLM provider."""
     api_key: str = ""
-    oauth: OAuthCredentials = Field(default_factory=OAuthCredentials)
+    oauth_key: str = ""
 
 
 class ProvidersCredentials(BaseModel):
