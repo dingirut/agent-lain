@@ -11,7 +11,7 @@ You are communicating with a user via Telegram.
 
 ## Message Tags
 
-The latest user message is prefixed with an auto-generated timestamp tag (e.g. `[2026-02-07 14:32 msgID:XXXX]`). This is added by the system — the user did not type it.
+The latest user message is prefixed with an auto-generated timestamp tag (e.g. `[2026-02-07 14:32]`). This is added by the system — the user did not type it.
 
 When the user replies to a specific message, you will see the quoted content inline:
 - `[reply_to from:@username (Name)]` followed by the quoted message text (prefixed with `>`) and a `---` separator before the user's actual message.

@@ -129,7 +129,7 @@ def _build_message_prefix(metadata: dict, include_timestamp: bool = True) -> str
 
     Returns a string like::
 
-        [2026-02-07 14:32 msgID:1234]
+        [2026-02-07 14:32]
         [reply_to from:@johndoe (John Doe)]
         > quoted reply text
         ---
@@ -138,7 +138,7 @@ def _build_message_prefix(metadata: dict, include_timestamp: bool = True) -> str
 
     Args:
         metadata: Message metadata dict.
-        include_timestamp: Whether to include the timestamp/msgID line.
+        include_timestamp: Whether to include the timestamp line.
             Set to False for history messages (only the current message gets a timestamp).
     """
     lines = []
@@ -155,14 +155,8 @@ def _build_message_prefix(metadata: dict, include_timestamp: bool = True) -> str
         else:
             ts_str = None
 
-        msg_id = metadata.get("message_id")
-        if ts_str or msg_id:
-            parts = []
-            if ts_str:
-                parts.append(ts_str)
-            if msg_id:
-                parts.append(f"msgID:{msg_id}")
-            lines.append(f"[{' '.join(parts)}]")
+        if ts_str:
+            lines.append(f"[{ts_str}]")
 
     # Reply context — inline quoted content
     reply = metadata.get("reply_to")

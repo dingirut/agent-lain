@@ -286,7 +286,7 @@ class AgentLoop:
             current_meta: dict = {}
             if is_first:
                 current_meta["timestamp"] = _dt.now().isoformat()
-            for k in ("message_id", "reply_to", "forwarded_from"):
+            for k in ("reply_to", "forwarded_from"):
                 if k in m.metadata:
                     current_meta[k] = m.metadata[k]
             prefix = _build_message_prefix(current_meta, include_timestamp=is_first)

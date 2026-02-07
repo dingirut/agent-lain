@@ -217,12 +217,13 @@ class TestProcessBatchContext:
             p["text"] for p in content_b if isinstance(p, dict) and p.get("type") == "text"
         )
 
-        # First message gets timestamp + msgID
-        assert "msgID:100" in text_a
+        # First message gets timestamp prefix (no msgID)
+        assert "[" in text_a  # has a tag bracket
         assert "msg A" in text_a
-        # Second message has no timestamp/msgID prefix
-        assert "msgID:" not in text_b
+        assert "msgID:" not in text_a
+        # Second message has no timestamp prefix
         assert "msg B" in text_b
+        assert "[" not in text_b.split("msg B")[0]  # no tag before content
 
     @pytest.mark.asyncio
     async def test_single_message_batch_saves_session(self, tmp_path):
