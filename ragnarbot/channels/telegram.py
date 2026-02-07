@@ -7,10 +7,11 @@ from loguru import logger
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
 
-from ragnarbot.bus.events import OutboundMessage
+from ragnarbot.bus.events import MediaAttachment, OutboundMessage
 from ragnarbot.bus.queue import MessageBus
 from ragnarbot.channels.base import BaseChannel
 from ragnarbot.config.schema import TelegramConfig
+from ragnarbot.media.manager import MediaManager
 
 
 def _markdown_to_telegram_html(text: str) -> str:
@@ -91,11 +92,13 @@ class TelegramChannel(BaseChannel):
         bus: MessageBus,
         bot_token: str = "",
         groq_api_key: str = "",
+        media_manager: MediaManager | None = None,
     ):
         super().__init__(config, bus)
         self.config: TelegramConfig = config
         self.bot_token = bot_token
         self.groq_api_key = groq_api_key
+        self.media_manager = media_manager
         self._app: Application | None = None
         self._chat_ids: dict[str, int] = {}  # Map sender_id to chat_id for replies
     
@@ -138,12 +141,24 @@ class TelegramChannel(BaseChannel):
         bot_info = await self._app.bot.get_me()
         logger.info(f"Telegram bot @{bot_info.username} connected")
         
+        # Register media download callback
+        if self.media_manager:
+            app = self._app
+
+            async def _download_by_file_id(file_id: str) -> tuple[bytes, str]:
+                file = await app.bot.get_file(file_id)
+                data = await file.download_as_bytearray()
+                name = file.file_path.split("/")[-1] if file.file_path else ""
+                return bytes(data), name
+
+            self.media_manager.register_download_callback("telegram", _download_by_file_id)
+
         # Start polling (this runs until stopped)
         await self._app.updater.start_polling(
             allowed_updates=["message"],
             drop_pending_updates=True  # Ignore old messages on startup
         )
-        
+
         # Keep running until stopped
         while self._running:
             await asyncio.sleep(1)
@@ -234,64 +249,64 @@ class TelegramChannel(BaseChannel):
         """Handle incoming messages (text, photos, voice, documents)."""
         if not update.message or not update.effective_user:
             return
-        
+
         message = update.message
         user = update.effective_user
         chat_id = message.chat_id
-        
+
         # Use stable numeric ID, but keep username for allowlist compatibility
         sender_id = str(user.id)
         if user.username:
             sender_id = f"{sender_id}|{user.username}"
-        
+
         # Store chat_id for replies
         self._chat_ids[sender_id] = chat_id
-        
+
         # Build content from text and/or media
-        content_parts = []
-        media_paths = []
-        
+        content_parts: list[str] = []
+        media_paths: list[str] = []
+        attachments: list[MediaAttachment] = []
+
         # Text content
         if message.text:
             content_parts.append(message.text)
         if message.caption:
             content_parts.append(message.caption)
-        
-        # Handle media files
-        media_file = None
-        media_type = None
-        
-        if message.photo:
-            media_file = message.photo[-1]  # Largest photo
-            media_type = "image"
-        elif message.voice:
-            media_file = message.voice
-            media_type = "voice"
-        elif message.audio:
-            media_file = message.audio
-            media_type = "audio"
-        elif message.document:
-            media_file = message.document
-            media_type = "file"
-        
-        # Download media if present
-        if media_file and self._app:
+
+        # --- Photos: eager download into memory (no disk save yet) ---
+        if message.photo and self._app:
+            photo = message.photo[-1]  # Largest resolution
             try:
-                file = await self._app.bot.get_file(media_file.file_id)
-                ext = self._get_extension(media_type, getattr(media_file, 'mime_type', None))
-                
-                # Save to workspace/media/
-                from pathlib import Path
-                media_dir = Path.home() / ".ragnarbot" / "media"
-                media_dir.mkdir(parents=True, exist_ok=True)
-                
-                file_path = media_dir / f"{media_file.file_id[:16]}{ext}"
-                await file.download_to_drive(str(file_path))
-                
-                media_paths.append(str(file_path))
-                
-                # Handle voice transcription
-                if media_type == "voice" or media_type == "audio":
+                file = await self._app.bot.get_file(photo.file_id)
+                data = await file.download_as_bytearray()
+                mime = "image/jpeg"  # Telegram photos are always JPEG
+                attachments.append(MediaAttachment(
+                    type="photo",
+                    file_id=photo.file_id,
+                    data=bytes(data),
+                    mime_type=mime,
+                ))
+                logger.debug(f"Downloaded photo {photo.file_id[:16]} into memory")
+            except Exception as e:
+                logger.error(f"Failed to download photo: {e}")
+                content_parts.append("[photo: download failed]")
+
+        # --- Voice / Audio: download + transcribe (unchanged behaviour) ---
+        elif message.voice or message.audio:
+            media_file = message.voice or message.audio
+            media_type = "voice" if message.voice else "audio"
+            if self._app:
+                try:
+                    from pathlib import Path
+                    file = await self._app.bot.get_file(media_file.file_id)
+                    ext = self._get_extension(media_type, getattr(media_file, 'mime_type', None))
+
+                    media_dir = Path.home() / ".ragnarbot" / "media"
+                    media_dir.mkdir(parents=True, exist_ok=True)
+                    file_path = media_dir / f"{media_file.file_id[:16]}{ext}"
+                    await file.download_to_drive(str(file_path))
+                    media_paths.append(str(file_path))
+
                     from ragnarbot.providers.transcription import GroqTranscriptionProvider
                     transcriber = GroqTranscriptionProvider(api_key=self.groq_api_key)
                     transcription = await transcriber.transcribe(file_path)
@@ -300,18 +315,29 @@ class TelegramChannel(BaseChannel):
                         content_parts.append(f"[transcription: {transcription}]")
                     else:
                         content_parts.append(f"[{media_type}: {file_path}]")
-                else:
-                    content_parts.append(f"[{media_type}: {file_path}]")
-                    
-                logger.debug(f"Downloaded {media_type} to {file_path}")
-            except Exception as e:
-                logger.error(f"Failed to download media: {e}")
-                content_parts.append(f"[{media_type}: download failed]")
-        
+
+                    logger.debug(f"Downloaded {media_type} to {file_path}")
+                except Exception as e:
+                    logger.error(f"Failed to download {media_type}: {e}")
+                    content_parts.append(f"[{media_type}: download failed]")
+
+        # --- Documents / files: lazy (NO download) ---
+        elif message.document:
+            doc = message.document
+            doc_name = doc.file_name or "unnamed_file"
+            attachments.append(MediaAttachment(
+                type="file",
+                file_id=doc.file_id,
+                data=None,
+                filename=doc_name,
+                mime_type=doc.mime_type or "",
+            ))
+            content_parts.append(f"[file available: {doc_name} (file_id: {doc.file_id})]")
+
         content = "\n".join(content_parts) if content_parts else "[empty message]"
-        
+
         logger.debug(f"Telegram message from {sender_id}: {content[:50]}...")
-        
+
         # Forward to the message bus
         metadata = {
             "message_id": message.message_id,
@@ -350,6 +376,7 @@ class TelegramChannel(BaseChannel):
             chat_id=str(chat_id),
             content=content,
             media=media_paths,
+            attachments=attachments,
             metadata=metadata,
         )
     
