@@ -3,7 +3,7 @@
 from abc import ABC, abstractmethod
 from typing import Any
 
-from ragnarbot.bus.events import InboundMessage, OutboundMessage
+from ragnarbot.bus.events import InboundMessage, MediaAttachment, OutboundMessage
 from ragnarbot.bus.queue import MessageBus
 
 
@@ -87,32 +87,35 @@ class BaseChannel(ABC):
         chat_id: str,
         content: str,
         media: list[str] | None = None,
-        metadata: dict[str, Any] | None = None
+        attachments: list[MediaAttachment] | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         """
         Handle an incoming message from the chat platform.
-        
+
         This method checks permissions and forwards to the bus.
-        
+
         Args:
             sender_id: The sender's identifier.
             chat_id: The chat/channel identifier.
             content: Message text content.
-            media: Optional list of media URLs.
+            media: Optional list of media URLs (voice/audio).
+            attachments: Optional structured media attachments.
             metadata: Optional channel-specific metadata.
         """
         if not self.is_allowed(sender_id):
             return
-        
+
         msg = InboundMessage(
             channel=self.name,
             sender_id=str(sender_id),
             chat_id=str(chat_id),
             content=content,
             media=media or [],
-            metadata=metadata or {}
+            attachments=attachments or [],
+            metadata=metadata or {},
         )
-        
+
         await self.bus.publish_inbound(msg)
     
     @property
