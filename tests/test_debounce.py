@@ -172,8 +172,8 @@ class TestProcessBatchContext:
         assert len(user_msgs) == 3
 
     @pytest.mark.asyncio
-    async def test_each_message_has_timestamp_prefix(self, tmp_path):
-        """Each user message in a batch gets its own timestamp prefix."""
+    async def test_only_first_message_has_timestamp_prefix(self, tmp_path):
+        """Only the first user message in a batch gets a timestamp prefix."""
         bus = MessageBus()
         agent = _make_agent(bus, debounce_seconds=0, tmp_path=tmp_path)
 
@@ -206,7 +206,6 @@ class TestProcessBatchContext:
         user_msgs = [m for m in captured_messages if m.get("role") == "user"]
         assert len(user_msgs) == 2
 
-        # Each should contain its own msgID prefix
         content_a = user_msgs[0]["content"]
         content_b = user_msgs[1]["content"]
 
@@ -218,9 +217,11 @@ class TestProcessBatchContext:
             p["text"] for p in content_b if isinstance(p, dict) and p.get("type") == "text"
         )
 
+        # First message gets timestamp + msgID
         assert "msgID:100" in text_a
-        assert "msgID:101" in text_b
         assert "msg A" in text_a
+        # Second message has no timestamp/msgID prefix
+        assert "msgID:" not in text_b
         assert "msg B" in text_b
 
     @pytest.mark.asyncio

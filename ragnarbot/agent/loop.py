@@ -281,12 +281,15 @@ class AgentLoop:
                     media_refs.append({"type": "photo", "filename": filename})
                     reply_to["has_photo"] = True
 
-            # Build prefix tags
-            current_meta = {"timestamp": _dt.now().isoformat()}
+            # Build prefix tags (timestamp only on the first message in the batch)
+            is_first = m is batch[0]
+            current_meta: dict = {}
+            if is_first:
+                current_meta["timestamp"] = _dt.now().isoformat()
             for k in ("message_id", "reply_to", "forwarded_from"):
                 if k in m.metadata:
                     current_meta[k] = m.metadata[k]
-            prefix = _build_message_prefix(current_meta)
+            prefix = _build_message_prefix(current_meta, include_timestamp=is_first)
             prefixed_content = prefix + m.content if prefix else m.content
 
             batch_data.append({
