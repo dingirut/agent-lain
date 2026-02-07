@@ -3,181 +3,66 @@
 </div>
 
 <p align="center">
-  <em>Async-first personal AI assistant. Lightweight, extensible, runs anywhere.</em>
+  <em>Your personal AI assistant in Telegram. Nothing else. 🪓</em>
 </p>
 
 ---
 
+No WhatsApp. No Discord. No Slack. No 47 integrations you'll never use.
+
+Just Telegram. Three LLM providers — **Anthropic**, **OpenAI**, **Gemini**. One config. You're done. ⚔️
+
 ## Install
 
-Install [uv](https://github.com/astral-sh/uv) if you don't have it:
+Grab [uv](https://github.com/astral-sh/uv) if you don't have it:
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-Then install ragnarbot:
+Then:
 
 ```bash
 uv tool install ragnarbot-ai
 ```
 
-## Quick Start
+## Setup
 
-**1. Initialize**
+### 🪓 Step 1: Create a Telegram bot
+
+1. Open Telegram, find [@BotFather](https://t.me/BotFather)
+2. Send `/newbot`, follow the prompts, pick a name
+3. Copy the token it gives you — you'll need it in a sec
+
+### 🪓 Step 2: Onboard
 
 ```bash
 ragnarbot onboard
 ```
 
-**2. Configure**
+Answer a few questions (provider, API key, paste that bot token) and you're live. No config files to edit by hand, no YAML to debug at 2am.
 
-Add your API key to `~/.ragnarbot/config.json`:
+## Access
 
-```json
-{
-  "providers": {
-    "anthropic": {
-      "apiKey": "sk-ant-xxx"
-    }
-  }
-}
-```
+Once the bot is running, just message it. If someone unauthorized tries to talk to it, the bot will send them an access code. You run one command in your terminal to approve them. That's it — no manual config editing, no user ID lookups.
 
-Get an API key from [Anthropic](https://console.anthropic.com/keys), [OpenAI](https://platform.openai.com/api-keys), or [Google AI Studio](https://aistudio.google.com/apikey).
-
-**3. Chat**
-
-```bash
-ragnarbot agent -m "What can you do?"
-```
-
-Or start an interactive session:
-
-```bash
-ragnarbot agent
-```
-
-## Telegram
-
-ragnarbot is designed to work through Telegram. Set up a bot, point it at your instance, and you have a personal AI assistant in your pocket.
-
-**Create a bot**
-
-Open Telegram, find `@BotFather`, send `/newbot`, and follow the prompts. Copy the token.
-
-**Get your user ID**
-
-Message `@userinfobot` on Telegram to get your numeric user ID.
-
-**Add to config**
-
-```json
-{
-  "channels": {
-    "telegram": {
-      "enabled": true,
-      "token": "YOUR_BOT_TOKEN",
-      "allowFrom": ["YOUR_USER_ID"]
-    }
-  }
-}
-```
-
-**Run the gateway**
+## 🏃 Run
 
 ```bash
 ragnarbot gateway
 ```
 
-Your bot is live. Message it from Telegram.
+Your bot is alive. Go text it.
 
-## Configuration
+To manage the gateway:
 
-All configuration lives in `~/.ragnarbot/config.json`. Keys are camelCase.
-
-### Providers
-
-Only one provider is required. ragnarbot uses [LiteLLM](https://github.com/BerriAI/litellm) under the hood, so any model string LiteLLM supports will work.
-
-| Provider | Config key | Models | API Key |
-|----------|-----------|--------|---------|
-| Anthropic | `providers.anthropic` | `anthropic/claude-*` | [console.anthropic.com](https://console.anthropic.com) |
-| OpenAI | `providers.openai` | `openai/gpt-*` | [platform.openai.com](https://platform.openai.com) |
-| Gemini | `providers.gemini` | `gemini/*` | [aistudio.google.com](https://aistudio.google.com) |
-
-Set the default model under `agents.defaults.model`.
-
-### Transcription
-
-Voice messages in Telegram are automatically transcribed when a Groq API key is configured. Groq provides free access to Whisper.
-
-```json
-{
-  "transcription": {
-    "apiKey": "gsk_xxx"
-  }
-}
+```bash
+ragnarbot gateway start    # start as a background daemon
+ragnarbot gateway stop     # stop the daemon
+ragnarbot gateway restart  # restart the daemon
+ragnarbot gateway delete   # remove the daemon completely
 ```
-
-Get a key at [console.groq.com](https://console.groq.com).
-
-### Web Search
-
-ragnarbot can search the web via the Brave Search API.
-
-```json
-{
-  "tools": {
-    "web": {
-      "search": {
-        "apiKey": "BSA-xxx"
-      }
-    }
-  }
-}
-```
-
-Get a key at [brave.com/search/api](https://brave.com/search/api/).
-
-## CLI Reference
-
-| Command | Description |
-|---------|-------------|
-| `ragnarbot onboard` | Initialize config and workspace |
-| `ragnarbot agent -m "..."` | Send a single message |
-| `ragnarbot agent` | Interactive chat session |
-| `ragnarbot gateway` | Start gateway (Telegram + cron + heartbeat) |
-| `ragnarbot status` | Show configuration status |
-| `ragnarbot channels status` | Show channel status |
-| `ragnarbot cron list` | List scheduled jobs |
-| `ragnarbot cron add` | Add a scheduled job |
-| `ragnarbot cron remove <id>` | Remove a scheduled job |
-
-## Architecture
-
-ragnarbot is async-first and built around a simple message-passing architecture:
-
-```
-Telegram --> MessageBus --> AgentLoop --> LLM --> Tools
-                                  \                /
-                                   \-- Sessions --/
-```
-
-**MessageBus** decouples channels from agent logic using async queues. Channels publish inbound messages; the agent publishes responses back.
-
-**AgentLoop** consumes messages, builds context (system prompt, conversation history, skills), calls the LLM, and executes tool calls in a loop. It also exposes a `process_direct()` path for CLI usage and cron jobs.
-
-**Tools** are registered in a `ToolRegistry` and exposed to the LLM as OpenAI-compatible function calls. Built-in tools include file operations, shell execution, web search, cron management, and sub-agent spawning.
-
-**Skills** are markdown files with YAML frontmatter. Skills marked `always: true` are included in every prompt; others appear as summaries the agent can load on demand.
-
-**Sessions** persist conversation history as JSONL files under `~/.ragnarbot/sessions/`.
-
-## License
-
-MIT
 
 ---
 
-<sub>Based on [nanobot](https://github.com/HKUDS/nanobot)</sub>
+MIT · Based on [nanobot](https://github.com/HKUDS/nanobot)
