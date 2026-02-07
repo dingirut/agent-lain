@@ -200,6 +200,7 @@ def gateway_main(
     from ragnarbot.cron.service import CronService
     from ragnarbot.cron.types import CronJob
     from ragnarbot.heartbeat.service import HeartbeatService
+    from ragnarbot.media.manager import MediaManager
     from ragnarbot.providers.litellm_provider import LiteLLMProvider
 
     if verbose:
@@ -237,6 +238,11 @@ def gateway_main(
     # Service credentials
     brave_api_key = creds.services.web_search.api_key or None
 
+    # Create media manager
+    media_dir = get_data_dir() / "media"
+    media_dir.mkdir(parents=True, exist_ok=True)
+    media_manager = MediaManager(base_dir=media_dir)
+
     # Create cron service first (callback set after agent creation)
     cron_store_path = get_data_dir() / "cron" / "jobs.json"
     cron = CronService(cron_store_path)
@@ -252,6 +258,7 @@ def gateway_main(
         exec_config=config.tools.exec,
         cron_service=cron,
         stream_steps=config.agents.defaults.stream_steps,
+        media_manager=media_manager,
     )
 
     # Set cron callback (needs agent)
@@ -286,7 +293,7 @@ def gateway_main(
     )
 
     # Create channel manager
-    channels = ChannelManager(config, bus, creds)
+    channels = ChannelManager(config, bus, creds, media_manager=media_manager)
 
     if channels.enabled_channels:
         console.print(f"[green]✓[/green] Channels enabled: {', '.join(channels.enabled_channels)}")
