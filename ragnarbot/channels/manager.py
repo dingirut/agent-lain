@@ -10,6 +10,7 @@ from ragnarbot.bus.events import OutboundMessage
 from ragnarbot.bus.queue import MessageBus
 from ragnarbot.channels.base import BaseChannel
 from ragnarbot.config.schema import Config
+from ragnarbot.media.manager import MediaManager
 
 
 class ChannelManager:
@@ -22,10 +23,17 @@ class ChannelManager:
     - Route outbound messages
     """
 
-    def __init__(self, config: Config, bus: MessageBus, credentials: Credentials | None = None):
+    def __init__(
+        self,
+        config: Config,
+        bus: MessageBus,
+        credentials: Credentials | None = None,
+        media_manager: MediaManager | None = None,
+    ):
         self.config = config
         self.bus = bus
         self.credentials = credentials or Credentials()
+        self.media_manager = media_manager
         self.channels: dict[str, BaseChannel] = {}
         self._dispatch_task: asyncio.Task | None = None
 
@@ -43,6 +51,7 @@ class ChannelManager:
                     self.bus,
                     bot_token=self.credentials.channels.telegram.bot_token,
                     groq_api_key=self.credentials.services.transcription.api_key,
+                    media_manager=self.media_manager,
                 )
                 logger.info("Telegram channel enabled")
             except ImportError as e:
