@@ -20,6 +20,11 @@ class CacheManager:
     When the provider's prompt cache expires (TTL-based), large tool results
     in the LLM message list are trimmed on-the-fly to reduce token costs.
     Session history is never modified — full tool results are always preserved.
+
+    Flush type (soft/hard) is determined by the *effective* context size —
+    i.e. what the API actually saw last time (previous flush applied) plus
+    new messages at full size.  This prevents overcounting already-flushed
+    content when determining aggressiveness.
     """
 
     def __init__(self, max_context_tokens: int = 200_000):
@@ -57,6 +62,29 @@ class CacheManager:
         elapsed = (datetime.now() - created_dt).total_seconds()
         return elapsed >= self.get_cache_ttl(model)
 
+    def _effective_tokens(self, messages: list[dict], model: str,
+                          tools: list[dict] | None, session) -> int:
+        """Count tokens as the API would see them, respecting previous flush.
+
+        If a previous flush happened, simulates it on a copy to get the
+        effective context size.  This avoids overcounting content that was
+        already trimmed in the last API call.
+        """
+        provider = self.get_provider_from_model(model)
+        cache = session.metadata.get("cache", {})
+        last_flush_type = cache.get("last_flush_type")
+
+        if last_flush_type:
+            sim = [m.copy() for m in messages]
+            self._flush_tool_results(sim, last_flush_type)
+            total = estimate_messages_tokens(sim, provider)
+        else:
+            total = estimate_messages_tokens(messages, provider)
+
+        if tools:
+            total += estimate_tools_tokens(tools)
+        return total
+
     def estimate_context_tokens(
         self, messages: list[dict], model: str,
         tools: list[dict] | None = None,
@@ -65,35 +93,25 @@ class CacheManager:
         """Estimate total context tokens for an API call.
 
         Counts tokens for all messages (system + history + current) and tool
-        definitions.  When ``session`` is provided and its cache has expired,
-        simulates flush on a copy to return the post-flush token count — i.e.
-        the actual number of tokens that would be sent to the provider.
+        definitions.  When ``session`` is provided, accounts for previous
+        flush state to return the effective token count — i.e. what the
+        provider would actually receive.
+
+        Without session or without prior flush history, returns the raw count.
 
         Args:
             messages: Full LLM message list (from build_messages).
             model: Model string for provider detection.
             tools: Tool definitions (OpenAI format).
-            session: Optional session; if provided, flush is simulated when
-                the cache has expired.
+            session: Optional session for flush-aware counting.
 
         Returns:
             Estimated token count.
         """
+        if session:
+            return self._effective_tokens(messages, model, tools, session)
+
         provider = self.get_provider_from_model(model)
-
-        if session and self.should_flush(session, model):
-            msgs_copy = [m.copy() for m in messages]
-            raw_tokens = estimate_messages_tokens(msgs_copy, provider)
-            if tools:
-                raw_tokens += estimate_tools_tokens(tools)
-            ratio = raw_tokens / self.max_context_tokens
-            flush_type = "soft" if ratio <= 0.4 else "hard"
-            self._flush_tool_results(msgs_copy, flush_type)
-            total = estimate_messages_tokens(msgs_copy, provider)
-            if tools:
-                total += estimate_tools_tokens(tools)
-            return total
-
         total = estimate_messages_tokens(messages, provider)
         if tools:
             total += estimate_tools_tokens(tools)
@@ -103,21 +121,21 @@ class CacheManager:
                        tools: list[dict] | None = None):
         """Trim large tool results in-place on the LLM message list.
 
+        Flush type is determined by the effective context size (respecting
+        previous flush), then applied to ALL raw messages — a clean slate.
+
         This modifies the ``messages`` list that will be sent to the API,
-        NOT the session history. Session metadata is updated to track flush state.
+        NOT the session history.
         """
-        provider = self.get_provider_from_model(model)
-        cache = session.metadata.get("cache", {})
-
-        total_tokens = estimate_messages_tokens(messages, provider)
-        if tools:
-            total_tokens += estimate_tools_tokens(tools)
-
-        ratio = total_tokens / self.max_context_tokens
+        # Effective count (with previous flush simulated) → determines type
+        effective_tokens = self._effective_tokens(messages, model, tools, session)
+        ratio = effective_tokens / self.max_context_tokens
         flush_type = "soft" if ratio <= 0.4 else "hard"
 
+        # Apply flush to raw messages — new flushing cursor
         flushed = self._flush_tool_results(messages, flush_type)
 
+        cache = session.metadata.get("cache", {})
         session.metadata["cache"] = {
             "created_at": cache.get("created_at"),
             "last_flush_at": datetime.now().isoformat(),
@@ -125,7 +143,7 @@ class CacheManager:
         }
 
         logger.info(
-            f"Cache flush ({flush_type}): {total_tokens} est. tokens, "
+            f"Cache flush ({flush_type}): {effective_tokens} effective tokens, "
             f"{flushed} results trimmed"
         )
 

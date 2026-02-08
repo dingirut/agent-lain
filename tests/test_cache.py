@@ -202,8 +202,8 @@ class TestEstimateContextTokens:
         )
         assert with_tools > without_tools
 
-    def test_with_session_no_flush_needed(self):
-        """When cache is fresh, returns raw count (no flush simulation)."""
+    def test_with_session_no_prior_flush(self):
+        """Session without last_flush_type returns raw count."""
         cm = CacheManager()
         messages = [
             {"role": "user", "content": "Hi"},
@@ -215,26 +215,50 @@ class TestEstimateContextTokens:
         result = cm.estimate_context_tokens(
             messages, "anthropic/claude-opus-4-6", session=session
         )
-        # Should be the raw count — no flush
         raw = cm.estimate_context_tokens(messages, "anthropic/claude-opus-4-6")
         assert result == raw
 
-    def test_with_expired_session_simulates_flush(self):
-        """When cache expired, simulates flush and returns smaller count."""
+    def test_with_prior_flush_simulates_effective_size(self):
+        """With last_flush_type set, returns effective (post-flush) count."""
         cm = CacheManager()
         messages = [
             {"role": "user", "content": "Hi"},
             {"role": "tool", "tool_call_id": "1", "content": "x" * 10000},
         ]
-        expired = datetime.now() - timedelta(seconds=600)
         session = FakeSession(metadata={
-            "cache": {"created_at": expired.isoformat()}
+            "cache": {
+                "created_at": datetime.now().isoformat(),
+                "last_flush_type": "soft",
+            }
         })
-        flushed_count = cm.estimate_context_tokens(
+        effective = cm.estimate_context_tokens(
             messages, "anthropic/claude-opus-4-6", session=session
         )
-        raw_count = cm.estimate_context_tokens(messages, "anthropic/claude-opus-4-6")
-        assert flushed_count < raw_count
+        raw = cm.estimate_context_tokens(messages, "anthropic/claude-opus-4-6")
+        assert effective < raw
+
+    def test_effective_count_prevents_overcounting(self):
+        """Flush type should be based on effective size, not raw.
+
+        Scenario: first flush brought context to 30%. New messages add 8%.
+        Raw would be 53% (hard), but effective is 38% (soft).
+        """
+        cm = CacheManager(max_context_tokens=10_000)
+        # Old tool result: raw ~2500 tokens, after soft flush ~1275 tokens
+        # New user message: ~500 tokens
+        messages = [
+            {"role": "tool", "tool_call_id": "1", "content": "a" * 10000},
+            {"role": "user", "content": "b" * 2000},
+        ]
+        session = FakeSession(metadata={
+            "cache": {
+                "created_at": (datetime.now() - timedelta(seconds=600)).isoformat(),
+                "last_flush_type": "soft",
+            }
+        })
+        # Flush with effective counting — should see ~38% → soft
+        cm.flush_messages(messages, session, "anthropic/claude-opus-4-6")
+        assert session.metadata["cache"]["last_flush_type"] == "soft"
 
     def test_simulation_does_not_modify_original(self):
         """Flush simulation must not touch the original messages."""
@@ -243,9 +267,11 @@ class TestEstimateContextTokens:
         messages = [
             {"role": "tool", "tool_call_id": "1", "content": original_content},
         ]
-        expired = datetime.now() - timedelta(seconds=600)
         session = FakeSession(metadata={
-            "cache": {"created_at": expired.isoformat()}
+            "cache": {
+                "created_at": datetime.now().isoformat(),
+                "last_flush_type": "soft",
+            }
         })
         cm.estimate_context_tokens(
             messages, "anthropic/claude-opus-4-6", session=session
