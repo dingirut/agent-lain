@@ -7,10 +7,12 @@ from loguru import logger
 from ragnarbot.agent.tokens import estimate_messages_tokens, estimate_tools_tokens
 
 # Cache TTL per provider (seconds)
+# Anthropic/OpenAI: sliding window, resets on each cache hit
+# Gemini: fixed TTL from creation, does NOT refresh on hit
 CACHE_TTL = {
-    "anthropic": 300,  # 5 minutes
-    "openai": 300,     # ~5 minutes (approximate)
-    "gemini": 300,     # 5 minutes
+    "anthropic": 300,   # 5 min sliding window
+    "openai": 600,      # ~5-10 min inactivity; upper bound to avoid premature flush
+    "gemini": 3600,     # 1 hour fixed from creation
 }
 
 
