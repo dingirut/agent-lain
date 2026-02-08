@@ -18,8 +18,8 @@ class CacheManager:
     """Manages prompt cache lifecycle and tool result flushing.
 
     When the provider's prompt cache expires (TTL-based), large tool results
-    in session history are trimmed to reduce token costs on the next cache
-    creation.
+    in the LLM message list are trimmed on-the-fly to reduce token costs.
+    Session history is never modified — full tool results are always preserved.
     """
 
     def __init__(self, max_context_tokens: int = 200_000):
@@ -57,20 +57,24 @@ class CacheManager:
         elapsed = (datetime.now() - created_dt).total_seconds()
         return elapsed >= self.get_cache_ttl(model)
 
-    def perform_flush(self, session, model: str, tools: list[dict] | None = None):
-        """Count tokens, determine flush level, flush tool results in-place."""
+    def flush_messages(self, messages: list[dict], session, model: str,
+                       tools: list[dict] | None = None):
+        """Trim large tool results in-place on the LLM message list.
+
+        This modifies the ``messages`` list that will be sent to the API,
+        NOT the session history. Session metadata is updated to track flush state.
+        """
         provider = self.get_provider_from_model(model)
         cache = session.metadata.get("cache", {})
 
-        total_tokens = estimate_messages_tokens(session.messages, provider)
-        total_tokens += 5000  # System prompt buffer
+        total_tokens = estimate_messages_tokens(messages, provider)
         if tools:
             total_tokens += estimate_tools_tokens(tools)
 
         ratio = total_tokens / self.max_context_tokens
         flush_type = "soft" if ratio <= 0.4 else "hard"
 
-        flushed = self._flush_tool_results(session.messages, flush_type)
+        flushed = self._flush_tool_results(messages, flush_type)
 
         session.metadata["cache"] = {
             "created_at": cache.get("created_at"),

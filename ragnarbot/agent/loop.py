@@ -249,12 +249,6 @@ class AgentLoop:
                 "last_name": msg.metadata.get("last_name"),
             }
 
-        # Flush expired cache — trim large tool results before building messages
-        if self.cache_manager.should_flush(session, self.model):
-            tool_defs = self.tools.get_definitions()
-            self.cache_manager.perform_flush(session, model=self.model, tools=tool_defs)
-            self.sessions.save(session)
-
         # Update tool contexts
         message_tool = self.tools.get("message")
         if isinstance(message_tool, MessageTool):
@@ -339,6 +333,13 @@ class AgentLoop:
                 session_key=session.key,
             )
             messages.append(user_msg)
+
+        # Flush expired cache — trim large tool results in LLM messages (not session)
+        if self.cache_manager.should_flush(session, self.model):
+            self.cache_manager.flush_messages(
+                messages, session, model=self.model,
+                tools=self.tools.get_definitions(),
+            )
 
         # Track where new messages start (the first user message in this batch)
         new_start = len(messages) - len(batch)
@@ -493,25 +494,19 @@ class AgentLoop:
         session_key = f"{origin_channel}:{origin_chat_id}"
         session = self.sessions.get_or_create(session_key)
 
-        # Flush expired cache
-        if self.cache_manager.should_flush(session, self.model):
-            tool_defs = self.tools.get_definitions()
-            self.cache_manager.perform_flush(session, model=self.model, tools=tool_defs)
-            self.sessions.save(session)
-
         # Update tool contexts
         message_tool = self.tools.get("message")
         if isinstance(message_tool, MessageTool):
             message_tool.set_context(origin_channel, origin_chat_id)
-        
+
         spawn_tool = self.tools.get("spawn")
         if isinstance(spawn_tool, SpawnTool):
             spawn_tool.set_context(origin_channel, origin_chat_id)
-        
+
         cron_tool = self.tools.get("cron")
         if isinstance(cron_tool, CronTool):
             cron_tool.set_context(origin_channel, origin_chat_id)
-        
+
         # Build messages with the announce content
         messages = self.context.build_messages(
             history=session.get_history(),
@@ -520,6 +515,13 @@ class AgentLoop:
             chat_id=origin_chat_id,
             session_metadata=session.metadata,
         )
+
+        # Flush expired cache — trim large tool results in LLM messages (not session)
+        if self.cache_manager.should_flush(session, self.model):
+            self.cache_manager.flush_messages(
+                messages, session, model=self.model,
+                tools=self.tools.get_definitions(),
+            )
 
         # Track where new messages start
         new_start = len(messages) - 1

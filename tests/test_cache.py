@@ -120,33 +120,29 @@ class TestFlushToolResults:
         assert len(hard_result) < len(soft_result)
 
 
-class TestPerformFlush:
+class TestFlushMessages:
     def test_soft_flush_under_40_percent(self):
         cm = CacheManager(max_context_tokens=200_000)
-        # Create messages totaling well under 40% of 200k (80k chars ~ 20k tokens)
         messages = [
             {"role": "user", "content": "hello"},
             {"role": "tool", "tool_call_id": "1", "content": "x" * 10000},
         ]
         session = FakeSession(
-            messages=messages,
             metadata={"cache": {"created_at": datetime.now().isoformat()}},
         )
-        cm.perform_flush(session, "anthropic/claude-opus-4-6")
+        cm.flush_messages(messages, session, "anthropic/claude-opus-4-6")
         assert session.metadata["cache"]["last_flush_type"] == "soft"
 
     def test_hard_flush_over_40_percent(self):
         cm = CacheManager(max_context_tokens=10_000)
-        # Create messages large enough to exceed 40% of 10k tokens
         messages = [
             {"role": "user", "content": "a" * 8000},
             {"role": "tool", "tool_call_id": "1", "content": "b" * 20000},
         ]
         session = FakeSession(
-            messages=messages,
             metadata={"cache": {"created_at": datetime.now().isoformat()}},
         )
-        cm.perform_flush(session, "anthropic/claude-opus-4-6")
+        cm.flush_messages(messages, session, "anthropic/claude-opus-4-6")
         assert session.metadata["cache"]["last_flush_type"] == "hard"
 
     def test_flush_updates_metadata(self):
@@ -157,14 +153,33 @@ class TestPerformFlush:
         ]
         created_at = datetime.now().isoformat()
         session = FakeSession(
-            messages=messages,
             metadata={"cache": {"created_at": created_at}},
         )
-        cm.perform_flush(session, "anthropic/claude-opus-4-6")
+        cm.flush_messages(messages, session, "anthropic/claude-opus-4-6")
         cache = session.metadata["cache"]
         assert cache["created_at"] == created_at  # Preserved
         assert "last_flush_at" in cache
         assert "last_flush_type" in cache
+
+    def test_session_messages_untouched(self):
+        """Flushing LLM messages must NOT modify session history."""
+        cm = CacheManager()
+        original_content = "x" * 10000
+        session = FakeSession(
+            messages=[
+                {"role": "tool", "tool_call_id": "1", "content": original_content},
+            ],
+            metadata={"cache": {"created_at": datetime.now().isoformat()}},
+        )
+        # LLM messages are a separate list
+        llm_messages = [
+            {"role": "tool", "tool_call_id": "1", "content": original_content},
+        ]
+        cm.flush_messages(llm_messages, session, "anthropic/claude-opus-4-6")
+        # LLM messages trimmed
+        assert "[... trimmed to save tokens ...]" in llm_messages[0]["content"]
+        # Session messages untouched
+        assert session.messages[0]["content"] == original_content
 
 
 class TestMarkCacheCreated:
