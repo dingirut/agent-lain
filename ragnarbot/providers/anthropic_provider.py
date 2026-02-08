@@ -72,6 +72,10 @@ class AnthropicProvider(LLMProvider):
         # Convert messages from OpenAI format to Anthropic format
         system_prompt, anthropic_messages = self._convert_messages(messages)
 
+        # Cache breakpoint 2: conversation history prefix
+        # Mark the second-to-last user message so all previous context is cached
+        self._inject_history_cache_control(anthropic_messages)
+
         kwargs: dict[str, Any] = {
             "model": model,
             "messages": anthropic_messages,
@@ -97,17 +101,60 @@ class AnthropicProvider(LLMProvider):
     def get_default_model(self) -> str:
         return self.default_model
 
-    def _build_system(self, system_prompt: str | None) -> list[dict[str, str]]:
-        """Build system param as list of text blocks.
+    def _build_system(self, system_prompt: str | None) -> list[dict[str, Any]]:
+        """Build system param as list of text blocks with cache_control.
 
         When using OAuth, the Claude Code identity block is prepended.
+        The last block gets a cache_control breakpoint so the system prompt
+        is cached across turns.
         """
-        blocks: list[dict[str, str]] = []
+        blocks: list[dict[str, Any]] = []
         if self.oauth_token:
             blocks.append({"type": "text", "text": _CLAUDE_CODE_IDENTITY})
         if system_prompt:
             blocks.append({"type": "text", "text": system_prompt})
+        if blocks:
+            blocks[-1]["cache_control"] = {"type": "ephemeral"}
         return blocks
+
+    @staticmethod
+    def _inject_history_cache_control(anthropic_messages: list[dict[str, Any]]) -> None:
+        """Add sliding cache_control breakpoint to conversation history.
+
+        Targets the last user message containing tool_result blocks, so
+        accumulated tool results are cached across agent-loop iterations.
+        Falls back to the second-to-last user message when no tool results
+        exist (first call in a turn).
+        """
+        # Sliding: last user message with tool_result content
+        for i in range(len(anthropic_messages) - 1, -1, -1):
+            msg = anthropic_messages[i]
+            if msg["role"] != "user":
+                continue
+            content = msg["content"]
+            if isinstance(content, list) and any(
+                isinstance(b, dict) and b.get("type") == "tool_result"
+                for b in content
+            ):
+                content[-1] = {**content[-1], "cache_control": {"type": "ephemeral"}}
+                return
+
+        # Fallback: 2nd-to-last user message
+        user_count = 0
+        for i in range(len(anthropic_messages) - 1, -1, -1):
+            if anthropic_messages[i]["role"] == "user":
+                user_count += 1
+                if user_count == 2:
+                    content = anthropic_messages[i]["content"]
+                    if isinstance(content, list) and content:
+                        content[-1] = {**content[-1], "cache_control": {"type": "ephemeral"}}
+                    elif isinstance(content, str):
+                        anthropic_messages[i]["content"] = [{
+                            "type": "text",
+                            "text": content,
+                            "cache_control": {"type": "ephemeral"},
+                        }]
+                    break
 
     @staticmethod
     def _convert_messages(
@@ -219,6 +266,12 @@ class AnthropicProvider(LLMProvider):
                 "prompt_tokens": response.usage.input_tokens,
                 "completion_tokens": response.usage.output_tokens,
                 "total_tokens": response.usage.input_tokens + response.usage.output_tokens,
+                "cache_creation_input_tokens": (
+                    getattr(response.usage, "cache_creation_input_tokens", 0) or 0
+                ),
+                "cache_read_input_tokens": (
+                    getattr(response.usage, "cache_read_input_tokens", 0) or 0
+                ),
             }
 
         return LLMResponse(
