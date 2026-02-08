@@ -136,7 +136,7 @@ When remembering something, write to {workspace_path}/memory/MEMORY.md"""
     def build_messages(
         self,
         history: list[dict[str, Any]],
-        current_message: str,
+        current_message: str | None = None,
         skill_names: list[str] | None = None,
         media: list[str] | None = None,
         media_refs: list[dict[str, str]] | None = None,
@@ -150,7 +150,8 @@ When remembering something, write to {workspace_path}/memory/MEMORY.md"""
 
         Args:
             history: Previous conversation messages.
-            current_message: The new user message.
+            current_message: The new user message. When None, only system
+                prompt and history are included (useful for token counting).
             skill_names: Optional skills to include.
             media: Optional list of local file paths for images/media (voice/audio).
             media_refs: Optional photo references saved by MediaManager.
@@ -183,11 +184,12 @@ When remembering something, write to {workspace_path}/memory/MEMORY.md"""
             messages.append(h_msg)
 
         # Current message (with optional image attachments)
-        user_content = self._build_user_content(
-            current_message, media=media, media_refs=media_refs,
-            session_key=session_key, media_base=media_base,
-        )
-        messages.append({"role": "user", "content": user_content})
+        if current_message is not None:
+            user_content = self._build_user_content(
+                current_message, media=media, media_refs=media_refs,
+                session_key=session_key, media_base=media_base,
+            )
+            messages.append({"role": "user", "content": user_content})
 
         return messages
 
