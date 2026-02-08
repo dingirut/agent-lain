@@ -175,7 +175,7 @@ When remembering something, write to {workspace_path}/memory/MEMORY.md"""
         # History (resolve media_refs for past photos)
         media_base = self._media_base_dir()
         for h_msg in history:
-            h_refs = h_msg.pop("media_refs", None)
+            h_refs = h_msg.get("media_refs")
             if h_refs and session_key and h_msg.get("role") == "user":
                 h_msg["content"] = self._build_user_content(
                     h_msg.get("content", ""), media_refs=h_refs,

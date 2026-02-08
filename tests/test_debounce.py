@@ -252,7 +252,9 @@ class TestProcessBatchContext:
 
         # Session should have add_message called: 1 user + 1 assistant = 2
         assert mock_session.add_message.call_count == 2
-        agent.sessions.save.assert_called_once_with(mock_session)
+        # save is called twice: once in finally (cache metadata) + once after messages
+        assert agent.sessions.save.call_count == 2
+        agent.sessions.save.assert_called_with(mock_session)
 
     @pytest.mark.asyncio
     async def test_multi_message_batch_saves_all_user_messages(self, tmp_path):

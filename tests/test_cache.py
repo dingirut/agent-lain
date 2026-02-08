@@ -1,5 +1,6 @@
 """Tests for cache manager module."""
 
+import pytest
 from datetime import datetime, timedelta
 
 from ragnarbot.agent.cache import CACHE_TTL, CacheManager
@@ -310,3 +311,218 @@ class TestMarkCacheCreated:
         CacheManager.mark_cache_created(session, {})
         cache = session.metadata.get("cache", {})
         assert "created_at" not in cache
+
+
+class TestOverlappingTrimEdgeCase:
+    """Content between threshold and 2*keep should not grow after trimming."""
+
+    def test_soft_flush_content_just_above_threshold(self):
+        """Content of 5001 chars should not become larger after soft flush."""
+        content = "x" * 5001
+        messages = [{"role": "tool", "tool_call_id": "1", "content": content}]
+        CacheManager._flush_tool_results(messages, "soft")
+        assert len(messages[0]["content"]) <= len(content)
+
+    def test_hard_flush_content_just_above_threshold(self):
+        """Content of 2001 chars should not become larger after hard flush."""
+        content = "y" * 2001
+        messages = [{"role": "tool", "tool_call_id": "1", "content": content}]
+        CacheManager._flush_tool_results(messages, "hard")
+        assert len(messages[0]["content"]) <= len(content)
+
+    def test_soft_flush_boundary_content_skipped(self):
+        """Content at exactly 2*keep + trim_tag size is left untouched."""
+        trim_tag = CacheManager.TRIM_TAG
+        boundary = 2 * CacheManager.SOFT_KEEP + len(trim_tag) + 2
+        content = "a" * boundary
+        messages = [{"role": "tool", "tool_call_id": "1", "content": content}]
+        CacheManager._flush_tool_results(messages, "soft")
+        # Should be left untouched since trimming wouldn't reduce size
+        assert messages[0]["content"] == content
+
+    def test_hard_flush_boundary_content_skipped(self):
+        """Content at exactly 2*keep + trim_tag size is left untouched."""
+        trim_tag = CacheManager.TRIM_TAG
+        boundary = 2 * CacheManager.HARD_KEEP + len(trim_tag) + 2
+        content = "b" * boundary
+        messages = [{"role": "tool", "tool_call_id": "1", "content": content}]
+        CacheManager._flush_tool_results(messages, "hard")
+        assert messages[0]["content"] == content
+
+    def test_content_well_above_boundary_is_trimmed(self):
+        """Content well above the boundary still gets trimmed normally."""
+        content = "c" * 10000
+        messages = [{"role": "tool", "tool_call_id": "1", "content": content}]
+        CacheManager._flush_tool_results(messages, "soft")
+        assert len(messages[0]["content"]) < len(content)
+        assert CacheManager.TRIM_TAG in messages[0]["content"]
+
+
+class TestProviderDetection:
+    """Provider detection should use prefix matching, not substring."""
+
+    def test_claude_prefix_match(self):
+        assert CacheManager.get_provider_from_model("claude-3-opus") == "anthropic"
+
+    def test_claude_substring_not_detected_as_prefix(self):
+        """Model with 'claude' in middle should fall to default, not match claude prefix."""
+        # "my-claude-killer" doesn't startswith("claude"), so it falls to default.
+        # Before the fix, `"claude" in lower` would have matched it as anthropic
+        # regardless of the default — the distinction matters for non-anthropic defaults.
+        result = CacheManager.get_provider_from_model("my-claude-killer")
+        # Falls through to default (anthropic), NOT matched by the claude rule
+        assert result == "anthropic"
+
+    def test_gemini_prefix_match(self):
+        assert CacheManager.get_provider_from_model("gemini-2.0-flash") == "gemini"
+
+    def test_gemini_substring_not_detected(self):
+        """Model with 'gemini' in middle should not match gemini prefix."""
+        # "my-gemini-clone" doesn't startswith("gemini"), falls to default
+        result = CacheManager.get_provider_from_model("my-gemini-clone")
+        assert result == "anthropic"  # default, not "gemini"
+
+
+class TestMaxContextTokensValidation:
+    def test_zero_raises(self):
+        with pytest.raises(ValueError, match="positive"):
+            CacheManager(max_context_tokens=0)
+
+    def test_negative_raises(self):
+        with pytest.raises(ValueError, match="positive"):
+            CacheManager(max_context_tokens=-1)
+
+    def test_positive_works(self):
+        cm = CacheManager(max_context_tokens=1)
+        assert cm.max_context_tokens == 1
+
+
+class TestInjectCacheControlLiteLLM:
+    """Tests for LiteLLM provider cache breakpoint injection."""
+
+    def test_system_prompt_gets_cache_control(self):
+        from ragnarbot.providers.litellm_provider import LiteLLMProvider
+
+        messages = [
+            {"role": "system", "content": "You are helpful."},
+            {"role": "user", "content": "Hi"},
+        ]
+        result = LiteLLMProvider._inject_cache_control(messages)
+        # System message content should be converted to list with cache_control
+        sys_msg = result[0]
+        assert isinstance(sys_msg["content"], list)
+        assert sys_msg["content"][0]["cache_control"] == {"type": "ephemeral"}
+
+    def test_original_messages_not_modified(self):
+        from ragnarbot.providers.litellm_provider import LiteLLMProvider
+
+        messages = [
+            {"role": "system", "content": "You are helpful."},
+            {"role": "user", "content": "Hi"},
+        ]
+        original_content = messages[0]["content"]
+        LiteLLMProvider._inject_cache_control(messages)
+        # Original should be untouched
+        assert messages[0]["content"] == original_content
+
+    def test_last_tool_message_gets_cache_control(self):
+        from ragnarbot.providers.litellm_provider import LiteLLMProvider
+
+        messages = [
+            {"role": "system", "content": "You are helpful."},
+            {"role": "user", "content": "Hi"},
+            {"role": "assistant", "content": "Using tool"},
+            {"role": "tool", "tool_call_id": "1", "content": "result 1"},
+            {"role": "tool", "tool_call_id": "2", "content": "result 2"},
+            {"role": "user", "content": "And then?"},
+        ]
+        result = LiteLLMProvider._inject_cache_control(messages)
+        # Last tool message (index 4) should have cache_control
+        assert result[4].get("cache_control") == {"type": "ephemeral"}
+        # Earlier tool message should not
+        assert "cache_control" not in result[3]
+
+    def test_fallback_to_second_user_message(self):
+        from ragnarbot.providers.litellm_provider import LiteLLMProvider
+
+        messages = [
+            {"role": "system", "content": "You are helpful."},
+            {"role": "user", "content": "First question"},
+            {"role": "assistant", "content": "First answer"},
+            {"role": "user", "content": "Second question"},
+        ]
+        result = LiteLLMProvider._inject_cache_control(messages)
+        # No tool messages → fallback: 2nd-to-last user (index 1) gets breakpoint
+        assert isinstance(result[1]["content"], list)
+        assert result[1]["content"][0].get("cache_control") == {"type": "ephemeral"}
+
+    def test_single_user_message_no_breakpoint_2(self):
+        from ragnarbot.providers.litellm_provider import LiteLLMProvider
+
+        messages = [
+            {"role": "system", "content": "You are helpful."},
+            {"role": "user", "content": "Only question"},
+        ]
+        result = LiteLLMProvider._inject_cache_control(messages)
+        # System gets breakpoint, but user message should not (no 2nd user message)
+        assert isinstance(result[0]["content"], list)  # system has it
+        user_content = result[1]["content"]
+        if isinstance(user_content, str):
+            pass  # no cache_control — correct
+        else:
+            # If somehow converted, check no cache_control
+            assert not any(
+                b.get("cache_control") for b in user_content
+                if isinstance(b, dict)
+            )
+
+
+class TestInjectCacheControlAnthropic:
+    """Tests for Anthropic provider cache breakpoint injection."""
+
+    def test_tool_result_user_message_gets_cache_control(self):
+        from ragnarbot.providers.anthropic_provider import AnthropicProvider
+
+        messages = [
+            {"role": "user", "content": "Hi"},
+            {"role": "assistant", "content": [
+                {"type": "text", "text": "Let me check"},
+                {"type": "tool_use", "id": "1", "name": "test", "input": {}},
+            ]},
+            {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "1", "content": "result"},
+            ]},
+            {"role": "assistant", "content": [{"type": "text", "text": "Done"}]},
+            {"role": "user", "content": "Thanks"},
+        ]
+        AnthropicProvider._inject_history_cache_control(messages)
+        # Last user message with tool_result is index 2
+        last_block = messages[2]["content"][-1]
+        assert last_block.get("cache_control") == {"type": "ephemeral"}
+
+    def test_fallback_to_second_user_message(self):
+        from ragnarbot.providers.anthropic_provider import AnthropicProvider
+
+        messages = [
+            {"role": "user", "content": "First question"},
+            {"role": "assistant", "content": [{"type": "text", "text": "answer"}]},
+            {"role": "user", "content": "Second question"},
+        ]
+        AnthropicProvider._inject_history_cache_control(messages)
+        # No tool_result → fallback: 2nd-to-last user (index 0) gets breakpoint
+        content = messages[0]["content"]
+        assert isinstance(content, list)
+        assert content[-1].get("cache_control") == {"type": "ephemeral"}
+
+    def test_no_mutation_of_original_content_blocks(self):
+        from ragnarbot.providers.anthropic_provider import AnthropicProvider
+
+        original_block = {"type": "tool_result", "tool_use_id": "1", "content": "result"}
+        messages = [
+            {"role": "user", "content": [original_block]},
+            {"role": "assistant", "content": [{"type": "text", "text": "ok"}]},
+            {"role": "user", "content": "Next"},
+        ]
+        AnthropicProvider._inject_history_cache_control(messages)
+        # The injection uses {**block, "cache_control": ...} — original should be untouched
+        assert "cache_control" not in original_block

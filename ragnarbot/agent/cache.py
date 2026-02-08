@@ -29,18 +29,34 @@ class CacheManager:
     content when determining aggressiveness.
     """
 
+    # Flush escalation threshold: context ratio above this uses hard flush
+    HARD_FLUSH_RATIO = 0.4
+
+    # Soft flush: trim tool results longer than SOFT_THRESHOLD, keeping
+    # SOFT_KEEP chars from head and tail.
+    SOFT_THRESHOLD = 5000
+    SOFT_KEEP = 2500
+
+    # Hard flush: more aggressive thresholds for large contexts
+    HARD_THRESHOLD = 2000
+    HARD_KEEP = 1000
+
+    TRIM_TAG = "[... trimmed to save tokens ...]"
+
     def __init__(self, max_context_tokens: int = 200_000):
+        if max_context_tokens <= 0:
+            raise ValueError("max_context_tokens must be positive")
         self.max_context_tokens = max_context_tokens
 
     @staticmethod
     def get_provider_from_model(model: str) -> str:
         """Extract provider name from a model string."""
         lower = model.lower()
-        if lower.startswith("anthropic/") or "claude" in lower:
+        if lower.startswith("anthropic/") or lower.startswith("claude"):
             return "anthropic"
         if lower.startswith("openai/") or lower.startswith("gpt"):
             return "openai"
-        if lower.startswith("gemini/") or "gemini" in lower:
+        if lower.startswith("gemini"):
             return "gemini"
         return "anthropic"
 
@@ -132,7 +148,7 @@ class CacheManager:
         # Effective count (with previous flush simulated) → determines type
         effective_tokens = self._effective_tokens(messages, model, tools, session)
         ratio = effective_tokens / self.max_context_tokens
-        flush_type = "soft" if ratio <= 0.4 else "hard"
+        flush_type = "soft" if ratio <= self.HARD_FLUSH_RATIO else "hard"
 
         # Apply flush to raw messages — new flushing cursor
         flushed = self._flush_tool_results(messages, flush_type)
@@ -149,15 +165,15 @@ class CacheManager:
             f"{flushed} results trimmed"
         )
 
-    @staticmethod
-    def _flush_tool_results(messages: list[dict], flush_type: str) -> int:
+    @classmethod
+    def _flush_tool_results(cls, messages: list[dict], flush_type: str) -> int:
         """Trim large tool results in-place. Returns count of trimmed results."""
-        trim_tag = "[... trimmed to save tokens ...]"
-
         if flush_type == "soft":
-            threshold, keep = 5000, 2500
+            threshold, keep = cls.SOFT_THRESHOLD, cls.SOFT_KEEP
         else:  # "hard"
-            threshold, keep = 2000, 1000
+            threshold, keep = cls.HARD_THRESHOLD, cls.HARD_KEEP
+
+        min_trimmed = 2 * keep + len(cls.TRIM_TAG) + 2  # +2 for \n wrappers
 
         count = 0
         for msg in messages:
@@ -166,7 +182,10 @@ class CacheManager:
             content = msg.get("content", "")
             if not isinstance(content, str) or len(content) <= threshold:
                 continue
-            msg["content"] = content[:keep] + f"\n{trim_tag}\n" + content[-keep:]
+            # Skip if trimming would produce a result equal or larger than the original
+            if len(content) <= min_trimmed:
+                continue
+            msg["content"] = content[:keep] + f"\n{cls.TRIM_TAG}\n" + content[-keep:]
             count += 1
         return count
 
