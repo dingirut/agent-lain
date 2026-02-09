@@ -447,13 +447,28 @@ class AgentLoop:
                     )
                     compacted_this_turn = True
 
+                # Safety: force flush if raw context exceeds API limit
+                # (e.g. tool results grew within this turn, or cache is active
+                # so the normal TTL-based flush hasn't fired)
+                tools_defs = self.tools.get_definitions()
+                raw_tokens = self.cache_manager.estimate_context_tokens(
+                    messages, self.model, tools=tools_defs,
+                )
+                if raw_tokens > self.max_context_tokens:
+                    flush_type = "extra_hard" if self.context_mode == "eco" else "hard"
+                    logger.warning(
+                        f"Safety flush ({flush_type}): {raw_tokens} tokens "
+                        f"exceed {self.max_context_tokens} limit"
+                    )
+                    CacheManager._flush_tool_results(messages, flush_type)
+
                 # Strip internal _ts metadata before sending to API
                 api_messages = [
                     {k: v for k, v in m.items() if k != "_ts"} for m in messages
                 ]
                 response = await self.provider.chat(
                     messages=api_messages,
-                    tools=self.tools.get_definitions(),
+                    tools=tools_defs,
                     model=self.model
                 )
 
@@ -748,13 +763,26 @@ class AgentLoop:
                     )
                     compacted_this_turn = True
 
+                # Safety: force flush if raw context exceeds API limit
+                tools_defs = self.tools.get_definitions()
+                raw_tokens = self.cache_manager.estimate_context_tokens(
+                    messages, self.model, tools=tools_defs,
+                )
+                if raw_tokens > self.max_context_tokens:
+                    flush_type = "extra_hard" if self.context_mode == "eco" else "hard"
+                    logger.warning(
+                        f"Safety flush ({flush_type}): {raw_tokens} tokens "
+                        f"exceed {self.max_context_tokens} limit"
+                    )
+                    CacheManager._flush_tool_results(messages, flush_type)
+
                 # Strip internal _ts metadata before sending to API
                 api_messages = [
                     {k: v for k, v in m.items() if k != "_ts"} for m in messages
                 ]
                 response = await self.provider.chat(
                     messages=api_messages,
-                    tools=self.tools.get_definitions(),
+                    tools=tools_defs,
                     model=self.model
                 )
 
@@ -921,10 +949,11 @@ class AgentLoop:
             session_metadata=session.metadata,
         )
         tools = self.tools.get_definitions()
+        # Use raw tokens (no session) — this is what the API actually receives.
+        # Effective estimation would undercount when cache is active (no flush).
         tokens = self.cache_manager.estimate_context_tokens(
             messages, self.model,
             tools=tools,
-            session=session,
         )
 
         # If a flush is pending, simulate it for accurate estimation

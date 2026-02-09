@@ -578,15 +578,27 @@ class TestShouldCompactWithSession:
         result = c.should_compact(messages, "normal", session=session)
         assert result is False
 
-    def test_session_affects_token_count(self):
+    def test_session_ignored_uses_raw_tokens(self):
+        """should_compact uses raw tokens regardless of session flush state.
+
+        This prevents the bug where effective tokens (post-flush simulation)
+        undercount the actual context size sent to the API, silently allowing
+        it to exceed the limit.
+        """
         provider = MagicMock()
         cm = CacheManager(max_context_tokens=1000)
         c = Compactor(provider, cm, 1000, "anthropic/claude-opus-4-6")
         messages = [{"role": "user", "content": "x" * 2000}]
-        # With no session, should trigger eco threshold
+        # Without session: raw tokens trigger eco threshold
         assert c.should_compact(messages, "eco") is True
-        # With session, same behavior (no flush state to reduce)
-        assert c.should_compact(messages, "eco", session=FakeSession()) is True
+        # With session that has flush state: still triggers (session is ignored)
+        session = FakeSession(metadata={
+            "cache": {
+                "last_flush_type": "hard",
+                "last_flush_at": "2026-02-09T10:00:00",
+            }
+        })
+        assert c.should_compact(messages, "eco", session=session) is True
 
 
 # ── _format_compaction_input no double newlines ─────────────────
