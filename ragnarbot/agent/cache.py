@@ -41,6 +41,10 @@ class CacheManager:
     HARD_THRESHOLD = 2000
     HARD_KEEP = 1000
 
+    # Extra-hard flush (eco mode): tail-only, no head preservation
+    EXTRA_HARD_THRESHOLD = 2000
+    EXTRA_HARD_KEEP = 200
+
     TRIM_TAG = "[... trimmed to save tokens ...]"
 
     def __init__(self, max_context_tokens: int = 200_000):
@@ -136,19 +140,24 @@ class CacheManager:
         return total
 
     def flush_messages(self, messages: list[dict], session, model: str,
-                       tools: list[dict] | None = None):
+                       tools: list[dict] | None = None,
+                       context_mode: str = "normal"):
         """Trim large tool results in-place on the LLM message list.
 
         Flush type is determined by the effective context size (respecting
         previous flush), then applied to ALL raw messages — a clean slate.
+        In eco mode, always uses extra_hard flush for maximum savings.
 
         This modifies the ``messages`` list that will be sent to the API,
         NOT the session history.
         """
-        # Effective count (with previous flush simulated) → determines type
+        # Eco mode always uses the most aggressive flush
         effective_tokens = self._effective_tokens(messages, model, tools, session)
-        ratio = effective_tokens / self.max_context_tokens
-        flush_type = "soft" if ratio <= self.HARD_FLUSH_RATIO else "hard"
+        if context_mode == "eco":
+            flush_type = "extra_hard"
+        else:
+            ratio = effective_tokens / self.max_context_tokens
+            flush_type = "soft" if ratio <= self.HARD_FLUSH_RATIO else "hard"
 
         # Apply flush to raw messages — new flushing cursor
         flushed = self._flush_tool_results(messages, flush_type)
@@ -168,12 +177,14 @@ class CacheManager:
     @classmethod
     def _flush_tool_results(cls, messages: list[dict], flush_type: str) -> int:
         """Trim large tool results in-place. Returns count of trimmed results."""
+        is_extra_hard = flush_type == "extra_hard"
+
         if flush_type == "soft":
             threshold, keep = cls.SOFT_THRESHOLD, cls.SOFT_KEEP
+        elif is_extra_hard:
+            threshold, keep = cls.EXTRA_HARD_THRESHOLD, cls.EXTRA_HARD_KEEP
         else:  # "hard"
             threshold, keep = cls.HARD_THRESHOLD, cls.HARD_KEEP
-
-        min_trimmed = 2 * keep + len(cls.TRIM_TAG) + 2  # +2 for \n wrappers
 
         count = 0
         for msg in messages:
@@ -182,12 +193,25 @@ class CacheManager:
             content = msg.get("content", "")
             if not isinstance(content, str) or len(content) <= threshold:
                 continue
-            # Skip if trimming would produce a result equal or larger than the original
-            if len(content) <= min_trimmed:
-                continue
-            msg["content"] = content[:keep] + f"\n{cls.TRIM_TAG}\n" + content[-keep:]
+            if is_extra_hard:
+                # Tail only — no head preservation
+                msg["content"] = cls.TRIM_TAG + "\n" + content[-keep:]
+            else:
+                min_trimmed = 2 * keep + len(cls.TRIM_TAG) + 2
+                if len(content) <= min_trimmed:
+                    continue
+                msg["content"] = content[:keep] + f"\n{cls.TRIM_TAG}\n" + content[-keep:]
             count += 1
         return count
+
+    @classmethod
+    def flush_for_compaction(cls, messages: list[dict], context_mode: str) -> int:
+        """Flush tool results before feeding messages to the compaction LLM.
+
+        Uses hard flush normally, extra_hard for eco mode.
+        """
+        flush_type = "extra_hard" if context_mode == "eco" else "hard"
+        return cls._flush_tool_results(messages, flush_type)
 
     @staticmethod
     def mark_cache_created(session, usage: dict):
