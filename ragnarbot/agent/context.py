@@ -2,94 +2,25 @@
 
 import base64
 import mimetypes
+import shutil
 from pathlib import Path
 from typing import Any
 
 from ragnarbot.agent.memory import MemoryStore
 from ragnarbot.agent.skills import SkillsLoader
 
+DEFAULTS_DIR = Path(__file__).parent.parent / "workspace_defaults"
+
 
 class ContextBuilder:
     """
     Builds the context (system prompt + messages) for the agent.
-    
+
     Assembles bootstrap files, memory, skills, and conversation history
     into a coherent prompt for the LLM.
     """
-    
+
     BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md", "IDENTITY.md"]
-    
-    BOOTSTRAP_DEFAULTS = {
-        "AGENTS.md": """# Agent Instructions
-
-You are a helpful AI assistant. Be concise, accurate, and friendly.
-
-## Guidelines
-
-- Always explain what you're doing before taking actions
-- Ask for clarification when the request is ambiguous
-- Use tools to help accomplish tasks
-- Remember important information in your memory files
-""",
-        "SOUL.md": """# Soul
-
-I am ragnarbot, a lightweight AI assistant.
-
-## Personality
-
-- Helpful and friendly
-- Concise and to the point
-- Curious and eager to learn
-
-## Values
-
-- Accuracy over speed
-- User privacy and safety
-- Transparency in actions
-""",
-        "USER.md": """# User
-
-Information about the user goes here.
-
-## Preferences
-
-- Communication style: (casual/formal)
-- Timezone: (your timezone)
-- Language: (your preferred language)
-""",
-        "TOOLS.md": """# Tool Preferences & Custom Notes
-
-This file is maintained by the agent based on conversations with the user.
-It stores user preferences, custom scripts, workflows, and tool-related
-notes learned over time.
-
-DO NOT clear or overwrite this header. Only append new sections below the separator.
-Document here when the user:
-- Expresses a preference about how a tool should be used
-- Sets up a custom workflow or script
-- Wants specific tool behavior remembered across sessions
-
----
-
-""",
-    }
-
-    MEMORY_DEFAULT = """# Long-term Memory
-
-This file stores important information that should persist across sessions.
-
-## User Information
-
-(Important facts about the user)
-
-## Preferences
-
-(User preferences learned over time)
-
-## Important Notes
-
-(Things to remember)
-"""
 
     def __init__(self, workspace: Path):
         self.workspace = workspace
@@ -211,18 +142,16 @@ When remembering something, write to {workspace_path}/memory/MEMORY.md"""
         return "\n\n".join(parts) if parts else ""
 
     def _ensure_bootstrap_files(self) -> None:
-        """Create bootstrap files in workspace if missing or empty."""
+        """Copy default workspace files from workspace_defaults/ if missing or empty."""
         self.workspace.mkdir(parents=True, exist_ok=True)
-        for filename, default in self.BOOTSTRAP_DEFAULTS.items():
-            path = self.workspace / filename
-            if not path.exists() or not path.read_text(encoding="utf-8").strip():
-                path.write_text(default, encoding="utf-8")
-
-        memory_dir = self.workspace / "memory"
-        memory_dir.mkdir(exist_ok=True)
-        memory_file = memory_dir / "MEMORY.md"
-        if not memory_file.exists() or not memory_file.read_text(encoding="utf-8").strip():
-            memory_file.write_text(self.MEMORY_DEFAULT, encoding="utf-8")
+        for default_file in DEFAULTS_DIR.rglob("*"):
+            if not default_file.is_file():
+                continue
+            rel = default_file.relative_to(DEFAULTS_DIR)
+            target = self.workspace / rel
+            if not target.exists() or not target.read_text(encoding="utf-8").strip():
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(default_file, target)
 
     def build_messages(
         self,

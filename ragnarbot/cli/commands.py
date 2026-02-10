@@ -105,24 +105,19 @@ def onboard():
 
 
 def _create_workspace_templates(workspace: Path):
-    """Create default workspace template files.
+    """Copy default workspace files from workspace_defaults/ if missing."""
+    import shutil
+    from ragnarbot.agent.context import DEFAULTS_DIR
 
-    Delegates to ContextBuilder which owns the canonical default content.
-    """
-    from ragnarbot.agent.context import ContextBuilder
-
-    for filename, default in ContextBuilder.BOOTSTRAP_DEFAULTS.items():
-        file_path = workspace / filename
-        if not file_path.exists():
-            file_path.write_text(default, encoding="utf-8")
-            console.print(f"  [dim]Created {filename}[/dim]")
-
-    memory_dir = workspace / "memory"
-    memory_dir.mkdir(exist_ok=True)
-    memory_file = memory_dir / "MEMORY.md"
-    if not memory_file.exists():
-        memory_file.write_text(ContextBuilder.MEMORY_DEFAULT, encoding="utf-8")
-        console.print("  [dim]Created memory/MEMORY.md[/dim]")
+    for default_file in DEFAULTS_DIR.rglob("*"):
+        if not default_file.is_file():
+            continue
+        rel = default_file.relative_to(DEFAULTS_DIR)
+        target = workspace / rel
+        if not target.exists():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(default_file, target)
+            console.print(f"  [dim]Created {rel}[/dim]")
 
 
 # ============================================================================
