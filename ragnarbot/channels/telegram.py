@@ -217,6 +217,53 @@ class TelegramChannel(BaseChannel):
         if not is_intermediate and not msg.metadata.get("keep_typing"):
             self._stop_typing(chat_id)
 
+        # --- Reaction handling ---
+        if msg.metadata.get("reaction"):
+            try:
+                from telegram import ReactionTypeEmoji
+                await self._app.bot.set_message_reaction(
+                    chat_id=chat_id,
+                    message_id=msg.metadata["target_message_id"],
+                    reaction=[ReactionTypeEmoji(emoji=msg.metadata["reaction"])],
+                )
+            except Exception as e:
+                logger.error(f"Error setting reaction: {e}")
+            return
+
+        # --- Media sending ---
+        media_type = msg.metadata.get("media_type")
+        if media_type and msg.metadata.get("media_path"):
+            media_path = msg.metadata["media_path"]
+            html_caption = _markdown_to_telegram_html(msg.content) if msg.content else None
+            try:
+                if media_type == "photo":
+                    with open(media_path, "rb") as f:
+                        await self._app.bot.send_photo(
+                            chat_id=chat_id,
+                            photo=f,
+                            caption=html_caption,
+                            parse_mode="HTML" if html_caption else None,
+                        )
+                elif media_type == "video":
+                    with open(media_path, "rb") as f:
+                        await self._app.bot.send_video(
+                            chat_id=chat_id,
+                            video=f,
+                            caption=html_caption,
+                            parse_mode="HTML" if html_caption else None,
+                        )
+                elif media_type == "document":
+                    with open(media_path, "rb") as f:
+                        await self._app.bot.send_document(
+                            chat_id=chat_id,
+                            document=f,
+                            caption=html_caption,
+                            parse_mode="HTML" if html_caption else None,
+                        )
+            except Exception as e:
+                logger.error(f"Error sending {media_type}: {e}")
+            return
+
         try:
             # Convert markdown to Telegram HTML (skip if already raw HTML)
             if msg.metadata.get("raw_html"):

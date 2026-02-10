@@ -81,6 +81,32 @@ spawn(task: str, label: str = None) -> str
 
 Use for complex or time-consuming tasks that can run independently. The subagent will complete the task and report back when done.
 
+## Telegram Media
+
+### send_photo
+Send a photo to the user. Telegram compresses the image for quick viewing.
+```
+send_photo(file_path: str, caption: str = None) -> str
+```
+
+### send_video
+Send a video to the user. Telegram compresses the video for quick viewing.
+```
+send_video(file_path: str, caption: str = None) -> str
+```
+
+### send_file
+Send a file as a Telegram document (original quality, no compression). Use for non-media files or when the user wants uncompressed originals.
+```
+send_file(file_path: str, caption: str = None) -> str
+```
+
+### set_reaction
+React to the user's last message with a single emoji. The target message is set automatically.
+```
+set_reaction(emoji: str) -> str
+```
+
 ## Scheduled Reminders (Cron)
 
 Use the `exec` tool to create scheduled reminders with `ragnarbot cron add`:
