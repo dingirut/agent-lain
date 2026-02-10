@@ -27,8 +27,9 @@ class ServiceCredential(BaseModel):
 
 class ServicesCredentials(BaseModel):
     """Credentials for external services."""
-    transcription: ServiceCredential = Field(default_factory=ServiceCredential)
-    web_search: ServiceCredential = Field(default_factory=ServiceCredential)
+    groq: ServiceCredential = Field(default_factory=ServiceCredential)
+    elevenlabs: ServiceCredential = Field(default_factory=ServiceCredential)
+    brave_search: ServiceCredential = Field(default_factory=ServiceCredential)
 
 
 class ChannelCredential(BaseModel):
