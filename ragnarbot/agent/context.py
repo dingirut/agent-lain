@@ -2,44 +2,31 @@
 
 import base64
 import mimetypes
+import shutil
 from pathlib import Path
 from typing import Any
 
 from ragnarbot.agent.memory import MemoryStore
 from ragnarbot.agent.skills import SkillsLoader
 
+DEFAULTS_DIR = Path(__file__).parent.parent / "workspace_defaults"
+
 
 class ContextBuilder:
     """
     Builds the context (system prompt + messages) for the agent.
-    
+
     Assembles bootstrap files, memory, skills, and conversation history
     into a coherent prompt for the LLM.
     """
-    
+
     BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md", "IDENTITY.md"]
-    
-    TOOLS_MD_HEADER = """# Tool Preferences & Custom Notes
-
-This file is maintained by the agent based on conversations with the user.
-It stores user preferences, custom scripts, workflows, and tool-related
-notes learned over time.
-
-DO NOT clear or overwrite this header. Only append new sections below the separator.
-Document here when the user:
-- Expresses a preference about how a tool should be used
-- Sets up a custom workflow or script
-- Wants specific tool behavior remembered across sessions
-
----
-
-"""
 
     def __init__(self, workspace: Path):
         self.workspace = workspace
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace)
-        self._ensure_tools_md()
+        self._ensure_bootstrap_files()
     
     def build_system_prompt(
         self,
@@ -154,11 +141,17 @@ When remembering something, write to {workspace_path}/memory/MEMORY.md"""
         
         return "\n\n".join(parts) if parts else ""
 
-    def _ensure_tools_md(self) -> None:
-        """Create TOOLS.md in workspace if it doesn't exist."""
-        tools_path = self.workspace / "TOOLS.md"
-        if not tools_path.exists():
-            tools_path.write_text(self.TOOLS_MD_HEADER, encoding="utf-8")
+    def _ensure_bootstrap_files(self) -> None:
+        """Copy default workspace files from workspace_defaults/ if missing or empty."""
+        self.workspace.mkdir(parents=True, exist_ok=True)
+        for default_file in DEFAULTS_DIR.rglob("*"):
+            if not default_file.is_file():
+                continue
+            rel = default_file.relative_to(DEFAULTS_DIR)
+            target = self.workspace / rel
+            if not target.exists() or not target.read_text(encoding="utf-8").strip():
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(default_file, target)
 
     def build_messages(
         self,
