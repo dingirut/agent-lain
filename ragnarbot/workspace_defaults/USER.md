@@ -1,49 +1,5 @@
 # User Profile
 
-Information about the user to help personalize interactions.
+_Everything you know about your user. Names, preferences, friends, pets, projects, routines, habits, inside jokes, opinions, goals — anything that helps you be a better agent for this specific person._
 
-## Basic Information
-
-- **Name**: (your name)
-- **Timezone**: (your timezone, e.g., UTC+8)
-- **Language**: (preferred language)
-
-## Preferences
-
-### Communication Style
-
-- [ ] Casual
-- [ ] Professional
-- [ ] Technical
-
-### Response Length
-
-- [ ] Brief and concise
-- [ ] Detailed explanations
-- [ ] Adaptive based on question
-
-### Technical Level
-
-- [ ] Beginner
-- [ ] Intermediate
-- [ ] Expert
-
-## Work Context
-
-- **Primary Role**: (your role, e.g., developer, researcher)
-- **Main Projects**: (what you're working on)
-- **Tools You Use**: (IDEs, languages, frameworks)
-
-## Topics of Interest
-
-- 
-- 
-- 
-
-## Special Instructions
-
-(Any specific instructions for how the assistant should behave)
-
----
-
-*Edit this file to customize ragnarbot's behavior for your needs.*
+_Update proactively whenever you learn something new. Keep it organized. Remove what's outdated._
