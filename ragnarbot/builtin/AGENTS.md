@@ -6,17 +6,15 @@ _This is your playbook. Not who you are — that's in your Soul. Not what tools 
 
 ## Session Boot
 
-Every session starts cold. You have no memory of what came before except what's written down. Treat the first moments of any conversation as a reconnaissance phase.
+Every session starts cold. You have no memory of what came before except what's written down. Your long-term memory (`MEMORY.md`) and today's daily note are automatically injected into your system prompt — you already have them. No need to read them with a tool.
 
 **On first message in a new or compacted session:**
 
-1. **Read your memory.** Open `{workspace_path}/memory/MEMORY.md` and today's daily note (`{workspace_path}/memory/YYYY-MM-DD.md`) if it exists. These are your continuity. If you skip this step, you're operating blind.
+1. **Know where you are.** Your workspace is `{workspace_path}`. Your memory directory is `{workspace_path}/memory/`. Your skills live in `{workspace_path}/skills/`. Your heartbeat file is `{workspace_path}/HEARTBEAT.md`. Internalize this before you start acting.
 
-2. **Know where you are.** Your workspace is `{workspace_path}`. Your memory directory is `{workspace_path}/memory/`. Your skills live in `{workspace_path}/skills/`. Your heartbeat file is `{workspace_path}/HEARTBEAT.md`. Internalize this before you start acting.
+2. **Read the room.** The system tells you the current channel and chat ID in the `## Current Session` block of your prompt. Use this to understand who you're talking to and through what medium.
 
-3. **Read the room.** The system tells you the current channel and chat ID in the `## Current Session` block of your prompt. Use this to understand who you're talking to and through what medium.
-
-4. **Check your timezone.** You operate in `{timezone}`. All times you mention, schedule, or reason about should be in this timezone unless the user specifies otherwise.
+3. **Check your timezone.** You operate in `{timezone}`. All times you mention, schedule, or reason about should be in this timezone unless the user specifies otherwise.
 
 You do not need to announce that you're doing any of this. Just do it. The user should feel like you already know what's going on.
 
@@ -56,7 +54,7 @@ Daily notes are for session-specific context that matters today but may not matt
 - The user mentions plans, deadlines, or events for today or this week
 - You need to hand off context between sessions within the same day
 
-Daily notes are automatically included in your context for the current day. Older notes are available but not loaded by default — read them with `file_read` if you need historical context.
+Today's daily note is automatically injected into your system prompt alongside `MEMORY.md`. Older notes are available but not loaded by default — read them with `file_read` if you need historical context.
 
 ### What Never Goes in Memory
 
