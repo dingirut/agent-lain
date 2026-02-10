@@ -147,15 +147,16 @@ class TestFlushToolResults:
         count = CacheManager._flush_tool_results(messages, "soft")
         assert count == 2
 
-    def test_before_ts_with_missing_ts_trims(self):
-        """Messages without _ts are treated as old (before cutoff)."""
+    def test_before_ts_with_missing_ts_skips(self):
+        """Messages without _ts are treated as new (current turn) — not trimmed."""
         messages = [
             {"role": "tool", "tool_call_id": "1", "content": "x" * 10000},
         ]
         count = CacheManager._flush_tool_results(
             messages, "soft", before_ts="2026-02-09T11:00:00"
         )
-        assert count == 1
+        assert count == 0
+        assert messages[0]["content"] == "x" * 10000
 
 
 class TestFlushMessages:
@@ -360,6 +361,68 @@ class TestEstimateContextTokens:
             messages, "anthropic/claude-opus-4-6", session=session
         )
         assert messages[0]["content"] == original_content
+
+
+class TestApplyPreviousFlush:
+    def test_trims_pre_flush_messages(self):
+        """Re-applies previous flush to history messages."""
+        cm = CacheManager()
+        messages = [
+            {"role": "tool", "tool_call_id": "1", "content": "x" * 10000,
+             "_ts": "2026-02-09T09:00:00"},
+            {"role": "tool", "tool_call_id": "2", "content": "y" * 10000,
+             "_ts": "2026-02-09T11:00:00"},
+        ]
+        session = FakeSession(metadata={
+            "cache": {
+                "last_flush_type": "soft",
+                "last_flush_at": "2026-02-09T10:00:00",
+            }
+        })
+        count = cm.apply_previous_flush(messages, session)
+        assert count == 1
+        assert "[... trimmed to save tokens ...]" in messages[0]["content"]
+        assert messages[1]["content"] == "y" * 10000  # After flush — untouched
+
+    def test_skips_current_turn_messages(self):
+        """Messages without _ts (from current turn) are not trimmed."""
+        cm = CacheManager()
+        messages = [
+            {"role": "tool", "tool_call_id": "1", "content": "x" * 10000,
+             "_ts": "2026-02-09T09:00:00"},
+            {"role": "tool", "tool_call_id": "2", "content": "z" * 10000},
+        ]
+        session = FakeSession(metadata={
+            "cache": {
+                "last_flush_type": "soft",
+                "last_flush_at": "2026-02-09T10:00:00",
+            }
+        })
+        count = cm.apply_previous_flush(messages, session)
+        assert count == 1
+        assert messages[1]["content"] == "z" * 10000  # No _ts — untouched
+
+    def test_no_flush_state_returns_zero(self):
+        cm = CacheManager()
+        messages = [
+            {"role": "tool", "tool_call_id": "1", "content": "x" * 10000},
+        ]
+        session = FakeSession(metadata={})
+        count = cm.apply_previous_flush(messages, session)
+        assert count == 0
+
+    def test_backward_compat_no_timestamp(self):
+        """Without last_flush_at, trims all eligible messages."""
+        cm = CacheManager()
+        messages = [
+            {"role": "tool", "tool_call_id": "1", "content": "x" * 10000,
+             "_ts": "2026-02-09T09:00:00"},
+        ]
+        session = FakeSession(metadata={
+            "cache": {"last_flush_type": "soft"}
+        })
+        count = cm.apply_previous_flush(messages, session)
+        assert count == 1
 
 
 class TestMarkCacheCreated:

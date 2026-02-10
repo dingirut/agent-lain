@@ -41,18 +41,12 @@ class Compactor:
         tools: list[dict] | None = None,
         session=None,
     ) -> bool:
-        """Check if context exceeds threshold for current mode.
-
-        Uses raw token count (ignoring previous flush state) because that's
-        what the API actually receives.  Effective estimation would undercount
-        when cache is still active and no flush is applied, allowing the
-        context to silently exceed the API limit.
-        """
+        """Check if context exceeds threshold for current mode."""
         if context_mode not in self.THRESHOLDS:
             return False
 
         total = self.cache_manager.estimate_context_tokens(
-            messages, self.model, tools=tools,
+            messages, self.model, tools=tools, session=session,
         )
 
         threshold = self.THRESHOLDS[context_mode] * self.max_context_tokens

@@ -204,10 +204,11 @@ class CacheManager:
         for msg in messages:
             if msg.get("role") != "tool":
                 continue
-            # Skip messages added after the flush cutoff
+            # Skip messages added after the flush cutoff (or without _ts —
+            # those are new messages from the current turn, not from history)
             if before_ts:
-                msg_ts = msg.get("_ts") or ""
-                if msg_ts > before_ts:
+                msg_ts = msg.get("_ts")
+                if not msg_ts or msg_ts > before_ts:
                     continue
             content = msg.get("content", "")
             if not isinstance(content, str) or len(content) <= threshold:
@@ -222,6 +223,28 @@ class CacheManager:
                 msg["content"] = content[:keep] + f"\n{cls.TRIM_TAG}\n" + content[-keep:]
             count += 1
         return count
+
+    def apply_previous_flush(self, messages: list[dict], session) -> int:
+        """Re-apply previous flush state to messages before an API call.
+
+        Session stores raw (untrimmed) messages.  When messages are rebuilt
+        from history, the previous flush is lost.  This method re-applies it
+        so the API receives the same effective size that was estimated.
+
+        Only trims history messages (those with ``_ts`` before the flush).
+        Messages from the current turn (no ``_ts``) are left at full size.
+
+        Returns:
+            Count of trimmed results.
+        """
+        cache = session.metadata.get("cache", {})
+        last_flush_type = cache.get("last_flush_type")
+        last_flush_at = cache.get("last_flush_at")
+        if not last_flush_type:
+            return 0
+        return self._flush_tool_results(
+            messages, last_flush_type, before_ts=last_flush_at,
+        )
 
     @classmethod
     def flush_for_compaction(cls, messages: list[dict], context_mode: str) -> int:

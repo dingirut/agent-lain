@@ -578,27 +578,42 @@ class TestShouldCompactWithSession:
         result = c.should_compact(messages, "normal", session=session)
         assert result is False
 
-    def test_session_ignored_uses_raw_tokens(self):
-        """should_compact uses raw tokens regardless of session flush state.
+    def test_session_affects_token_count(self):
+        """should_compact uses effective tokens when session has flush state.
 
-        This prevents the bug where effective tokens (post-flush simulation)
-        undercount the actual context size sent to the API, silently allowing
-        it to exceed the limit.
+        With a previous flush recorded, large tool results are simulated as
+        trimmed, lowering the effective token count and potentially avoiding
+        compaction that raw tokens would trigger.
         """
         provider = MagicMock()
-        cm = CacheManager(max_context_tokens=1000)
-        c = Compactor(provider, cm, 1000, "anthropic/claude-opus-4-6")
-        messages = [{"role": "user", "content": "x" * 2000}]
+        # eco threshold = 40% of 10000 = 4000 tokens
+        cm = CacheManager(max_context_tokens=10_000)
+        c = Compactor(provider, cm, 10_000, "anthropic/claude-opus-4-6")
+
+        # Tool result: 20000 chars ≈ 5000 tokens raw → above threshold
+        # After hard flush (keep=1000): ~2033 chars ≈ ~508 tokens → below
+        messages = [
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": None,
+             "tool_calls": [{"id": "tc1", "type": "function",
+                             "function": {"name": "exec", "arguments": "{}"}}]},
+            {"role": "tool", "tool_call_id": "tc1", "name": "exec",
+             "content": "x" * 20000, "_ts": "2026-02-09T09:00:00"},
+            {"role": "assistant", "content": "done"},
+        ]
         # Without session: raw tokens trigger eco threshold
         assert c.should_compact(messages, "eco") is True
-        # With session that has flush state: still triggers (session is ignored)
+
+        # With session that has flush state: effective tokens are lower
+        # because the tool result is simulated as trimmed
         session = FakeSession(metadata={
             "cache": {
                 "last_flush_type": "hard",
                 "last_flush_at": "2026-02-09T10:00:00",
             }
         })
-        assert c.should_compact(messages, "eco", session=session) is True
+        # Effective tokens after simulated flush should be below threshold
+        assert c.should_compact(messages, "eco", session=session) is False
 
 
 # ── _format_compaction_input no double newlines ─────────────────
@@ -642,7 +657,7 @@ class TestGetContextTokensPendingFlush:
     def test_pending_flush_reduces_token_count(self):
         """When cache TTL is expired, get_context_tokens should simulate flush."""
         from datetime import datetime, timedelta
-        from unittest.mock import MagicMock, patch, PropertyMock
+        from unittest.mock import MagicMock  # noqa: F811
         from ragnarbot.agent.cache import CacheManager
         from ragnarbot.session.manager import Session
 

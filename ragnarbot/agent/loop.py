@@ -420,13 +420,15 @@ class AgentLoop:
             while iteration < self.max_iterations:
                 iteration += 1
 
-                # Cache flush (if expired)
+                # Cache flush escalation (if TTL expired)
+                flushed = False
                 if self.cache_manager.should_flush(session, self.model):
                     self.cache_manager.flush_messages(
                         messages, session, model=self.model,
                         tools=self.tools.get_definitions(),
                         context_mode=self.context_mode,
                     )
+                    flushed = True
 
                 # Auto-compaction check (max once per turn)
                 if not compacted_this_turn and self.compactor.should_compact(
@@ -447,17 +449,22 @@ class AgentLoop:
                     )
                     compacted_this_turn = True
 
-                # Safety: force flush if raw context exceeds API limit
-                # (e.g. tool results grew within this turn, or cache is active
-                # so the normal TTL-based flush hasn't fired)
+                # Re-apply previous flush to history messages so the API
+                # sees the same effective size that was estimated.
+                # (skip if flush_messages just ran — it already trimmed everything)
+                if not flushed:
+                    self.cache_manager.apply_previous_flush(messages, session)
+
+                # Safety: force flush if context still exceeds API limit
+                # (e.g. new tool results grew within this turn)
                 tools_defs = self.tools.get_definitions()
-                raw_tokens = self.cache_manager.estimate_context_tokens(
+                actual_tokens = self.cache_manager.estimate_context_tokens(
                     messages, self.model, tools=tools_defs,
                 )
-                if raw_tokens > self.max_context_tokens:
+                if actual_tokens > self.max_context_tokens:
                     flush_type = "extra_hard" if self.context_mode == "eco" else "hard"
                     logger.warning(
-                        f"Safety flush ({flush_type}): {raw_tokens} tokens "
+                        f"Safety flush ({flush_type}): {actual_tokens} tokens "
                         f"exceed {self.max_context_tokens} limit"
                     )
                     CacheManager._flush_tool_results(messages, flush_type)
@@ -736,13 +743,15 @@ class AgentLoop:
             while iteration < self.max_iterations:
                 iteration += 1
 
-                # Cache flush (if expired)
+                # Cache flush escalation (if TTL expired)
+                flushed = False
                 if self.cache_manager.should_flush(session, self.model):
                     self.cache_manager.flush_messages(
                         messages, session, model=self.model,
                         tools=self.tools.get_definitions(),
                         context_mode=self.context_mode,
                     )
+                    flushed = True
 
                 # Auto-compaction check (max once per turn)
                 if not compacted_this_turn and self.compactor.should_compact(
@@ -763,15 +772,19 @@ class AgentLoop:
                     )
                     compacted_this_turn = True
 
-                # Safety: force flush if raw context exceeds API limit
+                # Re-apply previous flush to history messages
+                if not flushed:
+                    self.cache_manager.apply_previous_flush(messages, session)
+
+                # Safety: force flush if context still exceeds API limit
                 tools_defs = self.tools.get_definitions()
-                raw_tokens = self.cache_manager.estimate_context_tokens(
+                actual_tokens = self.cache_manager.estimate_context_tokens(
                     messages, self.model, tools=tools_defs,
                 )
-                if raw_tokens > self.max_context_tokens:
+                if actual_tokens > self.max_context_tokens:
                     flush_type = "extra_hard" if self.context_mode == "eco" else "hard"
                     logger.warning(
-                        f"Safety flush ({flush_type}): {raw_tokens} tokens "
+                        f"Safety flush ({flush_type}): {actual_tokens} tokens "
                         f"exceed {self.max_context_tokens} limit"
                     )
                     CacheManager._flush_tool_results(messages, flush_type)
@@ -949,20 +962,15 @@ class AgentLoop:
             session_metadata=session.metadata,
         )
         tools = self.tools.get_definitions()
-        # Use raw tokens (no session) — this is what the API actually receives.
-        # Effective estimation would undercount when cache is active (no flush).
         tokens = self.cache_manager.estimate_context_tokens(
             messages, self.model,
             tools=tools,
+            session=session,
         )
 
         # If a flush is pending, simulate it for accurate estimation
         if self.cache_manager.should_flush(session, self.model):
-            # Use RAW ratio for flush type selection (not underestimated effective)
-            raw_tokens = self.cache_manager.estimate_context_tokens(
-                messages, self.model, tools=tools,
-            )
-            ratio = raw_tokens / self.max_context_tokens
+            ratio = tokens / self.max_context_tokens
             if self.context_mode == "eco":
                 flush_type = "extra_hard"
             else:
