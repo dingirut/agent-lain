@@ -7,25 +7,36 @@ from typing import Any
 
 from loguru import logger
 
-from ragnarbot.bus.events import InboundMessage, OutboundMessage
-from ragnarbot.bus.queue import MessageBus
-from ragnarbot.providers.base import LLMProvider
+from ragnarbot.agent.background import BackgroundProcessManager
 from ragnarbot.agent.cache import CacheManager
 from ragnarbot.agent.compactor import Compactor
 from ragnarbot.agent.context import ContextBuilder
-from ragnarbot.agent.tools.registry import ToolRegistry
-from ragnarbot.agent.tools.filesystem import ReadFileTool, WriteFileTool, EditFileTool, ListDirTool
-from ragnarbot.agent.tools.shell import ExecTool
-from ragnarbot.agent.tools.web import WebSearchTool, WebFetchTool
+from ragnarbot.agent.subagent import SubagentManager
+from ragnarbot.agent.tools.background import (
+    DismissTool,
+    ExecBgTool,
+    KillTool,
+    OutputTool,
+    PollTool,
+)
+from ragnarbot.agent.tools.cron import CronTool
+from ragnarbot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from ragnarbot.agent.tools.media import DownloadFileTool
 from ragnarbot.agent.tools.message import MessageTool
-from ragnarbot.agent.tools.telegram import (
-    SendPhotoTool, SendVideoTool, SendFileTool, SetReactionTool,
-)
+from ragnarbot.agent.tools.registry import ToolRegistry
+from ragnarbot.agent.tools.shell import ExecTool
 from ragnarbot.agent.tools.spawn import SpawnTool
-from ragnarbot.agent.tools.cron import CronTool
-from ragnarbot.agent.subagent import SubagentManager
+from ragnarbot.agent.tools.telegram import (
+    SendFileTool,
+    SendPhotoTool,
+    SendVideoTool,
+    SetReactionTool,
+)
+from ragnarbot.agent.tools.web import WebFetchTool, WebSearchTool
+from ragnarbot.bus.events import InboundMessage, OutboundMessage
+from ragnarbot.bus.queue import MessageBus
 from ragnarbot.media.manager import MediaManager
+from ragnarbot.providers.base import LLMProvider
 from ragnarbot.session.manager import SessionManager
 
 
@@ -92,6 +103,10 @@ class AgentLoop:
             exec_config=self.exec_config,
         )
 
+        self.bg_processes = BackgroundProcessManager(
+            bus=bus, workspace=workspace, exec_config=self.exec_config,
+        )
+
         self._running = False
         self._register_default_tools()
     
@@ -132,6 +147,13 @@ class AgentLoop:
         # Cron tool (for scheduling)
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
+
+        # Background execution tools
+        self.tools.register(ExecBgTool(manager=self.bg_processes))
+        self.tools.register(PollTool(manager=self.bg_processes))
+        self.tools.register(OutputTool(manager=self.bg_processes))
+        self.tools.register(KillTool(manager=self.bg_processes))
+        self.tools.register(DismissTool(manager=self.bg_processes))
 
         # Download file tool (for lazy file downloads)
         if self.media_manager:
@@ -343,6 +365,14 @@ class AgentLoop:
         cron_tool = self.tools.get("cron")
         if isinstance(cron_tool, CronTool):
             cron_tool.set_context(msg.channel, msg.chat_id)
+
+        exec_bg_tool = self.tools.get("exec_bg")
+        if isinstance(exec_bg_tool, ExecBgTool):
+            exec_bg_tool.set_context(msg.channel, msg.chat_id)
+
+        poll_tool = self.tools.get("poll")
+        if isinstance(poll_tool, PollTool):
+            poll_tool.set_context(msg.channel, msg.chat_id)
 
         download_tool = self.tools.get("download_file")
         if isinstance(download_tool, DownloadFileTool):
@@ -737,6 +767,14 @@ class AgentLoop:
         cron_tool = self.tools.get("cron")
         if isinstance(cron_tool, CronTool):
             cron_tool.set_context(origin_channel, origin_chat_id)
+
+        exec_bg_tool = self.tools.get("exec_bg")
+        if isinstance(exec_bg_tool, ExecBgTool):
+            exec_bg_tool.set_context(origin_channel, origin_chat_id)
+
+        poll_tool = self.tools.get("poll")
+        if isinstance(poll_tool, PollTool):
+            poll_tool.set_context(origin_channel, origin_chat_id)
 
         # Build messages with the announce content
         messages = self.context.build_messages(
