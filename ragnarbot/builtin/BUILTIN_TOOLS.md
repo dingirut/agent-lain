@@ -26,7 +26,7 @@ Execute a shell command. Returns stdout, stderr, and exit code.
 ## Web Tools
 
 ### web_search
-Search the web via Brave Search. Returns titles, URLs, and snippets. Use when the user asks a question that needs current information, or when you need to look something up.
+Search the web using the configured search engine (Brave Search or DuckDuckGo). Returns titles, URLs, and snippets. Use when the user asks a question that needs current information, or when you need to look something up.
 
 ### web_fetch
 Fetch a URL and extract its content as markdown or plain text. Use when you have a specific URL to read (from search results, user-provided links, documentation). Set `extractMode` to "text" for simpler output or "markdown" (default) for structured content.

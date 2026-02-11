@@ -1,5 +1,6 @@
 """Web tools: web_search and web_fetch."""
 
+import asyncio
 import html
 import json
 import os
@@ -44,50 +45,101 @@ def _validate_url(url: str) -> tuple[bool, str]:
 
 
 class WebSearchTool(Tool):
-    """Search the web using Brave Search API."""
-    
+    """Search the web using the configured search engine (Brave or DuckDuckGo)."""
+
     name = "web_search"
     description = "Search the web. Returns titles, URLs, and snippets."
     parameters = {
         "type": "object",
         "properties": {
             "query": {"type": "string", "description": "Search query"},
-            "count": {"type": "integer", "description": "Results (1-10)", "minimum": 1, "maximum": 10}
+            "count": {
+                "type": "integer",
+                "description": "Results (1-10)",
+                "minimum": 1,
+                "maximum": 10,
+            },
         },
-        "required": ["query"]
+        "required": ["query"],
     }
-    
-    def __init__(self, api_key: str | None = None, max_results: int = 5):
+
+    def __init__(
+        self,
+        engine: str = "brave",
+        api_key: str | None = None,
+        max_results: int = 5,
+    ):
+        self.engine = engine
         self.api_key = api_key or os.environ.get("BRAVE_API_KEY", "")
         self.max_results = max_results
-    
+
     async def execute(self, query: str, count: int | None = None, **kwargs: Any) -> str:
+        n = min(max(count or self.max_results, 1), 10)
+
+        if self.engine == "duckduckgo":
+            return await self._search_duckduckgo(query, n)
+        return await self._search_brave(query, n)
+
+    async def _search_brave(self, query: str, n: int) -> str:
         if not self.api_key:
             return "Error: BRAVE_API_KEY not configured"
-        
+
         try:
-            n = min(max(count or self.max_results, 1), 10)
             async with httpx.AsyncClient() as client:
                 r = await client.get(
                     "https://api.search.brave.com/res/v1/web/search",
                     params={"q": query, "count": n},
-                    headers={"Accept": "application/json", "X-Subscription-Token": self.api_key},
-                    timeout=10.0
+                    headers={
+                        "Accept": "application/json",
+                        "X-Subscription-Token": self.api_key,
+                    },
+                    timeout=10.0,
                 )
                 r.raise_for_status()
-            
+
             results = r.json().get("web", {}).get("results", [])
             if not results:
                 return f"No results for: {query}"
-            
-            lines = [f"Results for: {query}\n"]
-            for i, item in enumerate(results[:n], 1):
-                lines.append(f"{i}. {item.get('title', '')}\n   {item.get('url', '')}")
-                if desc := item.get("description"):
-                    lines.append(f"   {desc}")
-            return "\n".join(lines)
+
+            return self._format_results(query, results, n)
         except Exception as e:
             return f"Error: {e}"
+
+    async def _search_duckduckgo(self, query: str, n: int) -> str:
+        try:
+            from ddgs import DDGS
+
+            def _search() -> list[dict]:
+                return DDGS().text(query, max_results=n)
+
+            results = await asyncio.to_thread(_search)
+
+            if not results:
+                return f"No results for: {query}"
+
+            return self._format_results(query, results, n, key_map=_DDG_KEYS)
+        except Exception as e:
+            return f"Error: {e}"
+
+    @staticmethod
+    def _format_results(
+        query: str,
+        results: list[dict],
+        n: int,
+        key_map: dict[str, str] | None = None,
+    ) -> str:
+        km = key_map or _BRAVE_KEYS
+        lines = [f"Results for: {query}\n"]
+        for i, item in enumerate(results[:n], 1):
+            lines.append(f"{i}. {item.get(km['title'], '')}\n   {item.get(km['url'], '')}")
+            if desc := item.get(km["description"]):
+                lines.append(f"   {desc}")
+        return "\n".join(lines)
+
+
+# Key mappings for different search engines
+_BRAVE_KEYS = {"title": "title", "url": "url", "description": "description"}
+_DDG_KEYS = {"title": "title", "url": "href", "description": "body"}
 
 
 class WebFetchTool(Tool):
