@@ -1,6 +1,7 @@
 """Web channel — browser-based chat via WebSocket."""
 
 import base64
+import ipaddress
 import json
 import mimetypes
 import uuid
@@ -37,6 +38,9 @@ class WebChannel(BaseChannel):
         self._runner: web.AppRunner | None = None
         self._uploads: dict[str, dict] = {}  # file_id → {path, filename, mime_type, size}
         self._msg_counter: int = 0
+        self._allowed_nets: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = [
+            ipaddress.ip_network(n, strict=False) for n in config.allowed_networks
+        ] if config.allowed_networks else []
 
     # ------------------------------------------------------------------
     # Auth
@@ -50,10 +54,28 @@ class WebChannel(BaseChannel):
     # Lifecycle
     # ------------------------------------------------------------------
 
+    def _make_ip_filter(self):
+        nets = self._allowed_nets
+
+        @web.middleware
+        async def ip_filter(request: web.Request, handler):
+            peer = request.remote
+            try:
+                addr = ipaddress.ip_address(peer)
+            except ValueError:
+                raise web.HTTPForbidden(text="forbidden")
+            if not any(addr in net for net in nets):
+                logger.warning("Blocked request from {} (not in allowed_networks)", peer)
+                raise web.HTTPForbidden(text="forbidden")
+            return await handler(request)
+
+        return ip_filter
+
     async def start(self) -> None:
         UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-        self._app = web.Application(client_max_size=MAX_UPLOAD_SIZE)
+        middlewares = [self._make_ip_filter()] if self._allowed_nets else []
+        self._app = web.Application(client_max_size=MAX_UPLOAD_SIZE, middlewares=middlewares)
         self._app.router.add_get("/", self._handle_index)
         self._app.router.add_get("/ws", self._handle_websocket)
         self._app.router.add_post("/upload", self._handle_upload)
