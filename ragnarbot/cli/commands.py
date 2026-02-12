@@ -311,6 +311,24 @@ def gateway_main(
             duration = _time.time() - start_time
             log_execution(job, response, status, duration, error)
 
+            # Append a silent marker to the user's active session so the
+            # main agent knows an isolated job ran (without triggering a turn).
+            if job.payload.mode == "isolated" and job.payload.to:
+                try:
+                    channel = job.payload.channel or "cli"
+                    session_key = f"{channel}:{job.payload.to}"
+                    session = agent.sessions.get_or_create(session_key)
+                    ts = _time.strftime("%Y-%m-%d %H:%M:%S")
+                    marker = (
+                        f"[Cron result: {job.name} | id: {job.id} "
+                        f"| {ts} | status: {status}]"
+                    )
+                    session.add_message("assistant", marker)
+                    agent.sessions.save(session)
+                except Exception as marker_err:
+                    from loguru import logger as _log
+                    _log.warning(f"Failed to save cron marker: {marker_err}")
+
         return response
     cron.on_job = on_cron_job
 
