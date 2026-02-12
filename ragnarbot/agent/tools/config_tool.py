@@ -16,9 +16,10 @@ class ConfigTool(Tool):
 
     name = "config"
     description = (
-        "View and modify bot configuration. "
+        "View and modify bot configuration and secrets. "
         "Actions: schema (discover fields), get (read value), set (change value), "
-        "list (all current values), diff (non-default values)."
+        "list (all current values), diff (non-default values). "
+        "Use 'secrets.*' paths to manage credentials (e.g. secrets.providers.anthropic.api_key)."
     )
 
     parameters = {
@@ -31,7 +32,10 @@ class ConfigTool(Tool):
             },
             "path": {
                 "type": "string",
-                "description": "Dot-notation path (e.g. 'agents.defaults.model'). For schema/get/set.",
+                "description": (
+                    "Dot-notation path (e.g. 'agents.defaults.model'). For schema/get/set. "
+                    "Use 'secrets.*' prefix for credentials (e.g. 'secrets.providers.anthropic.api_key')."
+                ),
             },
             "value": {
                 "type": "string",
@@ -64,9 +68,17 @@ class ConfigTool(Tool):
         return f"Unknown action: {action}"
 
     def _action_schema(self, path: str | None) -> str:
+        from ragnarbot.agent.tools.secrets_helpers import secrets_schema
+        from ragnarbot.auth.credentials import load_credentials
         from ragnarbot.config.loader import load_config
         from ragnarbot.config.path_utils import get_all_paths, get_field_meta
         from ragnarbot.config.schema import Config
+
+        # Secrets-only schema
+        if path and path.startswith("secrets"):
+            creds = load_credentials()
+            filter_path = path if path != "secrets" else None
+            return secrets_schema(creds, filter_path)
 
         config = load_config()
         all_paths = get_all_paths(config)
@@ -85,13 +97,31 @@ class ConfigTool(Tool):
             except ValueError:
                 lines.append(f"{p}: (metadata unavailable)")
 
+        if not lines and path:
+            return f"No fields matching '{path}'"
+
+        # Append secrets schema when no path filter
+        if not path:
+            creds = load_credentials()
+            sec = secrets_schema(creds)
+            if sec:
+                lines.append("")
+                lines.append(sec)
+
         if not lines:
-            return f"No fields matching '{path}'" if path else "No fields found"
+            return "No fields found"
         return "\n".join(lines)
 
     def _action_get(self, path: str | None) -> str:
         if not path:
             return "Error: 'path' is required for get action"
+
+        if path.startswith("secrets."):
+            from ragnarbot.agent.tools.secrets_helpers import secrets_get
+            from ragnarbot.auth.credentials import load_credentials
+
+            creds = load_credentials()
+            return secrets_get(creds, path[8:])
 
         from ragnarbot.config.loader import load_config
         from ragnarbot.config.path_utils import get_by_path, get_field_meta
@@ -117,6 +147,17 @@ class ConfigTool(Tool):
         if value is None:
             return "Error: 'value' is required for set action"
 
+        if path.startswith("secrets."):
+            from ragnarbot.agent.tools.secrets_helpers import secrets_set
+            from ragnarbot.auth.credentials import load_credentials, save_credentials
+
+            creds = load_credentials()
+            creds, result_str = secrets_set(creds, path[8:], value)
+            if not result_str.startswith("Error"):
+                save_credentials(creds)
+            return result_str
+
+        from ragnarbot.agent.tools.secrets_helpers import check_config_dependency
         from ragnarbot.config.loader import load_config, save_config
         from ragnarbot.config.path_utils import get_by_path, get_field_meta, set_by_path
         from ragnarbot.config.schema import Config
@@ -125,8 +166,16 @@ class ConfigTool(Tool):
             config = load_config()
             old_value = get_by_path(config, path)
             set_by_path(config, path, value)
-            save_config(config)
             new_value = get_by_path(config, path)
+
+            # Check credential dependencies before persisting
+            dep_error = check_config_dependency(path, str(new_value))
+            if dep_error:
+                # Rollback: restore old value
+                set_by_path(config, path, old_value)
+                return f"Error: {dep_error}"
+
+            save_config(config)
             meta = get_field_meta(Config, path)
             reload_level = meta.get("reload", "unknown")
 
@@ -152,12 +201,21 @@ class ConfigTool(Tool):
             return f"Error: {e}"
 
     def _action_list(self) -> str:
+        from ragnarbot.agent.tools.secrets_helpers import secrets_list
+        from ragnarbot.auth.credentials import load_credentials
         from ragnarbot.config.loader import load_config
         from ragnarbot.config.path_utils import get_all_paths
 
         config = load_config()
         all_paths = get_all_paths(config)
         lines = [f"{p} = {v!r}" for p, v in sorted(all_paths.items())]
+
+        creds = load_credentials()
+        sec = secrets_list(creds)
+        if sec:
+            lines.append("")
+            lines.append(sec)
+
         return "\n".join(lines)
 
     def _action_diff(self) -> str:
@@ -178,7 +236,8 @@ class ConfigTool(Tool):
                 diffs.append(f"{p}: {dflt!r} → {cur!r}")
 
         if not diffs:
-            return "All values are at defaults."
+            return "All values are at defaults.\n(Secrets excluded from diff — no defaults to compare against.)"
+        diffs.append("\n(Secrets excluded from diff — no defaults to compare against.)")
         return "\n".join(diffs)
 
     def _apply_hot_reload(self, path: str, value: Any) -> str | None:

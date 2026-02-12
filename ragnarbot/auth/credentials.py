@@ -47,6 +47,7 @@ class Credentials(BaseModel):
     providers: ProvidersCredentials = Field(default_factory=ProvidersCredentials)
     services: ServicesCredentials = Field(default_factory=ServicesCredentials)
     channels: ChannelsCredentials = Field(default_factory=ChannelsCredentials)
+    extra: dict[str, str] = Field(default_factory=dict)
 
 
 def get_credentials_path() -> Path:
