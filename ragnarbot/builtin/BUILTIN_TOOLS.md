@@ -98,6 +98,12 @@ Fields have reload levels:
 ### restart
 Schedule a graceful gateway restart. The restart happens after the current response is fully sent. Use after changing "warm" config values that need a restart to apply.
 
+### update
+Check for new ragnarbot versions, view release notes, and self-update. Actions:
+- `check` — compare current version against the latest GitHub release. Returns `current_version`, `latest_version`, and `update_available`.
+- `changelog` — fetch release notes for a specific version. Pass `version` (e.g. `"0.4.0"`) or omit to get the latest. Returns the release body from GitHub.
+- `update` — upgrade ragnarbot to the latest version and restart. Tries `uv tool upgrade` first, falls back to `pip install --upgrade`. After upgrade, the gateway restarts automatically and sends a notification with the changelog URL.
+
 ## Downloads
 
 ### download_file
