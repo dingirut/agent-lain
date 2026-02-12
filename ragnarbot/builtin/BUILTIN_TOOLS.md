@@ -80,6 +80,24 @@ Schedule recurring tasks or reminders. Actions:
 
 Jobs run through the agent and deliver responses to the user's chat.
 
+## Configuration
+
+### config
+View and modify bot configuration at runtime. Actions:
+- `schema` — discover available config fields with types, defaults, and reload levels. Pass `path` to filter by prefix (e.g. `agents.defaults`).
+- `get` — read the current value of a config field. Requires `path`.
+- `set` — change a config value. Requires `path` and `value`. Values are auto-coerced to the target type (e.g. "0.5" becomes float).
+- `list` — show all current config values as a flat list.
+- `diff` — show only values that differ from defaults.
+
+Fields have reload levels:
+- **hot** — applied immediately (e.g. temperature, max_tokens, stream_steps, search settings).
+- **warm** — saved to disk, requires `restart` tool to apply (e.g. model, telegram settings, gateway port).
+- **cold** — saved to disk, requires full re-onboard to apply (e.g. workspace path).
+
+### restart
+Schedule a graceful gateway restart. The restart happens after the current response is fully sent. Use after changing "warm" config values that need a restart to apply.
+
 ## Downloads
 
 ### download_file

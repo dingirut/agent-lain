@@ -61,10 +61,12 @@ class AnthropicProvider(LLMProvider):
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
         model: str | None = None,
-        max_tokens: int = 4096,
-        temperature: float = 0.7,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
     ) -> LLMResponse:
         model = model or self.default_model
+        max_tokens = max_tokens if max_tokens is not None else self.default_max_tokens
+        temperature = temperature if temperature is not None else self.default_temperature
         # Strip provider prefix — config stores "anthropic/claude-...", SDK expects "claude-..."
         if model.startswith("anthropic/"):
             model = model[len("anthropic/"):]

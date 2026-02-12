@@ -320,21 +320,42 @@ def gateway_main(
         try:
             await cron.start()
             await heartbeat.start()
-            await asyncio.gather(
-                agent.run(),
-                channels.start_all(),
-                _config_reloader(),
-            )
+
+            agent_task = asyncio.create_task(agent.run())
+            channel_task = asyncio.create_task(channels.start_all())
+            reloader_task = asyncio.create_task(_config_reloader())
+
+            # Wait for agent to finish (normal stop or restart request)
+            await agent_task
+
+            # Cancel other tasks
+            for task in [channel_task, reloader_task]:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+
+            # Cleanup
+            heartbeat.stop()
+            cron.stop()
+            await channels.stop_all()
         except KeyboardInterrupt:
             console.print("\nShutting down...")
             heartbeat.stop()
             cron.stop()
             agent.stop()
             await channels.stop_all()
-        finally:
-            pid_path.unlink(missing_ok=True)
 
     asyncio.run(run())
+
+    if agent.restart_requested:
+        pid_path.unlink(missing_ok=True)
+        console.print("[green]✓[/green] Restarting gateway...")
+        import sys
+        os.execv(sys.executable, [sys.executable] + sys.argv)
+    else:
+        pid_path.unlink(missing_ok=True)
 
 
 @gateway_app.command("start")

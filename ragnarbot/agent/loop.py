@@ -19,11 +19,13 @@ from ragnarbot.agent.tools.background import (
     OutputTool,
     PollTool,
 )
+from ragnarbot.agent.tools.config_tool import ConfigTool
 from ragnarbot.agent.tools.cron import CronTool
 from ragnarbot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from ragnarbot.agent.tools.media import DownloadFileTool
 from ragnarbot.agent.tools.message import MessageTool
 from ragnarbot.agent.tools.registry import ToolRegistry
+from ragnarbot.agent.tools.restart import RestartTool
 from ragnarbot.agent.tools.shell import ExecTool
 from ragnarbot.agent.tools.spawn import SpawnTool
 from ragnarbot.agent.tools.telegram import (
@@ -111,6 +113,7 @@ class AgentLoop:
         )
 
         self._running = False
+        self._restart_requested = False
         self._register_default_tools()
     
     def _register_default_tools(self) -> None:
@@ -161,6 +164,10 @@ class AgentLoop:
         # Download file tool (for lazy file downloads)
         if self.media_manager:
             self.tools.register(DownloadFileTool(self.media_manager))
+
+        # Config and restart tools
+        self.tools.register(ConfigTool(agent=self))
+        self.tools.register(RestartTool(agent=self))
     
     async def run(self) -> None:
         """Run the agent loop, processing messages from the bus."""
@@ -216,6 +223,16 @@ class AgentLoop:
         self._running = False
         logger.info("Agent loop stopping")
 
+    @property
+    def restart_requested(self) -> bool:
+        """Whether a restart has been requested."""
+        return self._restart_requested
+
+    def request_restart(self) -> None:
+        """Schedule a graceful restart after the current response completes."""
+        self._restart_requested = True
+        logger.info("Restart requested — will restart after current processing completes")
+
     def _reap_processing_task(self):
         """Check for completed/failed background task."""
         if self._processing_task and self._processing_task.done():
@@ -224,6 +241,8 @@ class AgentLoop:
             except Exception as e:
                 logger.error(f"Processing task error: {e}")
             self._processing_task = None
+            if self._restart_requested:
+                self._running = False
 
     async def _await_processing_task(self):
         """Wait for any active processing to complete."""
