@@ -213,6 +213,10 @@ def gateway_main(
             default_model=config.agents.defaults.model,
         )
 
+    # Apply config defaults to provider (base class starts with hardcoded values)
+    provider.set_temperature(config.agents.defaults.temperature)
+    provider.set_max_tokens(config.agents.defaults.max_tokens)
+
     # Service credentials
     brave_api_key = creds.services.brave_search.api_key or None
     search_engine = config.tools.web.search.engine
