@@ -21,12 +21,12 @@ from ragnarbot.agent.tools.background import (
 )
 from ragnarbot.agent.tools.config_tool import ConfigTool
 from ragnarbot.agent.tools.cron import CronTool
+from ragnarbot.agent.tools.deliver_result import DeliverResultTool
 from ragnarbot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from ragnarbot.agent.tools.media import DownloadFileTool
 from ragnarbot.agent.tools.message import MessageTool
 from ragnarbot.agent.tools.registry import ToolRegistry
 from ragnarbot.agent.tools.restart import RestartTool
-from ragnarbot.agent.tools.update import UpdateTool
 from ragnarbot.agent.tools.shell import ExecTool
 from ragnarbot.agent.tools.spawn import SpawnTool
 from ragnarbot.agent.tools.telegram import (
@@ -35,6 +35,7 @@ from ragnarbot.agent.tools.telegram import (
     SendVideoTool,
     SetReactionTool,
 )
+from ragnarbot.agent.tools.update import UpdateTool
 from ragnarbot.agent.tools.web import WebFetchTool, WebSearchTool
 from ragnarbot.bus.events import InboundMessage, OutboundMessage
 from ragnarbot.bus.queue import MessageBus
@@ -994,6 +995,168 @@ class AgentLoop:
         
         response = await self._process_batch([msg])
         return response.content if response else ""
+
+    def _build_isolated_tool_registry(
+        self, channel: str, chat_id: str,
+    ) -> tuple[ToolRegistry, DeliverResultTool]:
+        """Build a fresh tool registry for an isolated cron job.
+
+        Each invocation creates new tool instances so concurrent isolated jobs
+        share no mutable state.  The ``message`` and ``spawn`` tools are
+        excluded (they don't make sense in non-interactive mode).
+        """
+        reg = ToolRegistry()
+
+        # File tools
+        reg.register(ReadFileTool())
+        reg.register(WriteFileTool())
+        reg.register(EditFileTool())
+        reg.register(ListDirTool())
+
+        # Shell
+        reg.register(ExecTool(
+            working_dir=str(self.workspace),
+            timeout=self.exec_config.timeout,
+            restrict_to_workspace=self.exec_config.restrict_to_workspace,
+        ))
+
+        # Web
+        reg.register(WebSearchTool(engine=self.search_engine, api_key=self.brave_api_key))
+        reg.register(WebFetchTool())
+
+        # Telegram media & reaction
+        send_cb = self.bus.publish_outbound
+        photo_tool = SendPhotoTool(send_callback=send_cb)
+        photo_tool.set_context(channel, chat_id)
+        reg.register(photo_tool)
+
+        video_tool = SendVideoTool(send_callback=send_cb)
+        video_tool.set_context(channel, chat_id)
+        reg.register(video_tool)
+
+        file_tool = SendFileTool(send_callback=send_cb)
+        file_tool.set_context(channel, chat_id)
+        reg.register(file_tool)
+
+        reaction_tool = SetReactionTool(send_callback=send_cb)
+        reaction_tool.set_context(channel, chat_id)
+        reg.register(reaction_tool)
+
+        # Cron
+        if self.cron_service:
+            cron_tool = CronTool(self.cron_service)
+            cron_tool.set_context(channel, chat_id)
+            reg.register(cron_tool)
+
+        # Background execution
+        bg = BackgroundProcessManager(
+            bus=self.bus, workspace=self.workspace, exec_config=self.exec_config,
+        )
+        exec_bg = ExecBgTool(manager=bg)
+        exec_bg.set_context(channel, chat_id)
+        reg.register(exec_bg)
+
+        poll = PollTool(manager=bg)
+        poll.set_context(channel, chat_id)
+        reg.register(poll)
+        reg.register(OutputTool(manager=bg))
+        reg.register(KillTool(manager=bg))
+        reg.register(DismissTool(manager=bg))
+
+        # Config / restart / update
+        config_t = ConfigTool(agent=self)
+        reg.register(config_t)
+        restart_t = RestartTool(agent=self)
+        restart_t.set_context(channel, chat_id)
+        reg.register(restart_t)
+        update_t = UpdateTool(agent=self)
+        update_t.set_context(channel, chat_id)
+        reg.register(update_t)
+
+        # Download file
+        if self.media_manager:
+            dl = DownloadFileTool(self.media_manager)
+            dl.set_context(channel, f"{channel}:{chat_id}")
+            reg.register(dl)
+
+        # deliver_result — isolated-only
+        deliver_tool = DeliverResultTool()
+        reg.register(deliver_tool)
+
+        return reg, deliver_tool
+
+    async def process_cron_isolated(
+        self,
+        job_name: str,
+        message: str,
+        schedule_desc: str,
+        channel: str,
+        chat_id: str,
+    ) -> str | None:
+        """Run an isolated cron job — fresh context, no session history.
+
+        Returns the result string (from deliver_result or final LLM text),
+        or None if the agent produced no output.
+        """
+        tools, deliver_tool = self._build_isolated_tool_registry(channel, chat_id)
+
+        session_metadata = {
+            "cron_isolated": {
+                "job_name": job_name,
+                "schedule_desc": schedule_desc,
+                "task_message": message,
+            },
+        }
+
+        messages = self.context.build_messages(
+            history=[],
+            current_message=message,
+            channel=channel,
+            chat_id=chat_id,
+            session_metadata=session_metadata,
+        )
+
+        max_iterations = 20
+        for _ in range(max_iterations):
+            tools_defs = tools.get_definitions()
+            api_messages = [
+                {k: v for k, v in m.items() if k != "_ts"} for m in messages
+            ]
+            response = await self.provider.chat(
+                messages=api_messages, tools=tools_defs, model=self.model,
+            )
+
+            if response.has_tool_calls:
+                tool_call_dicts = [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.name,
+                            "arguments": json.dumps(tc.arguments),
+                        },
+                    }
+                    for tc in response.tool_calls
+                ]
+                messages = self.context.add_assistant_message(
+                    messages, response.content, tool_call_dicts,
+                )
+
+                for tc in response.tool_calls:
+                    result = await tools.execute(tc.name, tc.arguments)
+                    messages = self.context.add_tool_result(
+                        messages, tc.id, tc.name, result,
+                    )
+
+                # If deliver_result was called, return immediately
+                if deliver_tool.result is not None:
+                    return deliver_tool.result
+            else:
+                # Agent finished with text — use as fallback result
+                return response.content or None
+
+        # Exhausted iterations — return whatever deliver_tool captured
+        return deliver_tool.result
 
     def get_context_tokens(
         self,

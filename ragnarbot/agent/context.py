@@ -61,6 +61,13 @@ class ContextBuilder:
             if telegram:
                 parts.append(telegram)
 
+        # 3b. Cron isolated mode (conditional)
+        if session_metadata and session_metadata.get("cron_isolated"):
+            cron_ctx = session_metadata["cron_isolated"]
+            cron_isolated = self._load_builtin_cron_isolated(cron_ctx)
+            if cron_isolated:
+                parts.append(cron_isolated)
+
         # 4. Bootstrap protocol (first-run only, self-deleting)
         bootstrap_protocol = self.workspace / "BOOTSTRAP.md"
         if bootstrap_protocol.exists():
@@ -141,6 +148,20 @@ Skills with available="false" need dependencies installed first - you can try in
             full_name=full_name or "Unknown",
             username=user_data.get("username") or "N/A",
             user_id=user_data.get("user_id") or "N/A",
+        )
+
+    def _load_builtin_cron_isolated(self, cron_ctx: dict) -> str:
+        """Load the cron isolated mode system prompt with placeholders."""
+        import time as _time
+        file_path = BUILTIN_DIR / "CRON_ISOLATED.md"
+        if not file_path.exists():
+            return ""
+        content = file_path.read_text(encoding="utf-8")
+        return content.format(
+            job_name=cron_ctx.get("job_name", "Unknown"),
+            schedule_desc=cron_ctx.get("schedule_desc", "Unknown"),
+            current_time=_time.strftime("%Y-%m-%d %H:%M:%S %Z"),
+            task_message=cron_ctx.get("task_message", ""),
         )
 
     def _load_bootstrap_files(self) -> str:

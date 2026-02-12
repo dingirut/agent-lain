@@ -16,26 +16,60 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
+def _detect_timezone() -> str:
+    """Detect the local IANA timezone name."""
+    import os
+
+    if tz := os.environ.get("TZ"):
+        return tz
+
+    # macOS / Linux: /etc/localtime symlink → .../zoneinfo/Region/City
+    try:
+        link = os.readlink("/etc/localtime")
+        if "zoneinfo/" in link:
+            return link.split("zoneinfo/")[-1]
+    except OSError:
+        pass
+
+    # Linux: /etc/timezone plain-text file
+    try:
+        return Path("/etc/timezone").read_text().strip()
+    except OSError:
+        pass
+
+    return "UTC"
+
+
 def _compute_next_run(schedule: CronSchedule, now_ms: int) -> int | None:
     """Compute next run time in ms."""
     if schedule.kind == "at":
         return schedule.at_ms if schedule.at_ms and schedule.at_ms > now_ms else None
-    
+
     if schedule.kind == "every":
         if not schedule.every_ms or schedule.every_ms <= 0:
             return None
         # Next interval from now
         return now_ms + schedule.every_ms
-    
+
     if schedule.kind == "cron" and schedule.expr:
         try:
             from croniter import croniter
-            cron = croniter(schedule.expr, time.time())
-            next_time = cron.get_next()
-            return int(next_time * 1000)
+
+            if schedule.tz:
+                from datetime import datetime
+                from zoneinfo import ZoneInfo
+                tz = ZoneInfo(schedule.tz)
+                now = datetime.now(tz)
+                cron = croniter(schedule.expr, now)
+                next_dt = cron.get_next(datetime)
+                return int(next_dt.timestamp() * 1000)
+            else:
+                cron = croniter(schedule.expr, time.time())
+                next_time = cron.get_next()
+                return int(next_time * 1000)
         except Exception:
             return None
-    
+
     return None
 
 
@@ -77,6 +111,7 @@ class CronService:
                         payload=CronPayload(
                             kind=j["payload"].get("kind", "agent_turn"),
                             message=j["payload"].get("message", ""),
+                            mode=j["payload"].get("mode", "isolated"),
                             deliver=j["payload"].get("deliver", False),
                             channel=j["payload"].get("channel"),
                             to=j["payload"].get("to"),
@@ -124,6 +159,7 @@ class CronService:
                     "payload": {
                         "kind": j.payload.kind,
                         "message": j.payload.message,
+                        "mode": j.payload.mode,
                         "deliver": j.payload.deliver,
                         "channel": j.payload.channel,
                         "to": j.payload.to,
@@ -259,6 +295,7 @@ class CronService:
         name: str,
         schedule: CronSchedule,
         message: str,
+        mode: str = "isolated",
         deliver: bool = False,
         channel: str | None = None,
         to: str | None = None,
@@ -267,7 +304,11 @@ class CronService:
         """Add a new job."""
         store = self._load_store()
         now = _now_ms()
-        
+
+        # One-shot jobs auto-delete after execution (logs persist separately)
+        if schedule.kind == "at":
+            delete_after_run = True
+
         job = CronJob(
             id=str(uuid.uuid4())[:8],
             name=name,
@@ -276,6 +317,7 @@ class CronService:
             payload=CronPayload(
                 kind="agent_turn",
                 message=message,
+                mode=mode,
                 deliver=deliver,
                 channel=channel,
                 to=to,
@@ -323,6 +365,56 @@ class CronService:
                 return job
         return None
     
+    def update_job(self, job_id: str, **updates) -> CronJob | None:
+        """Update a job's fields.
+
+        Supported keys: name, message, mode, enabled, schedule (dict with
+        kind + every_seconds/cron_expr).
+        """
+        store = self._load_store()
+        for job in store.jobs:
+            if job.id != job_id:
+                continue
+
+            schedule_changed = False
+
+            if "name" in updates:
+                job.name = updates["name"]
+            if "message" in updates:
+                job.payload.message = updates["message"]
+            if "mode" in updates and updates["mode"] in ("isolated", "session"):
+                job.payload.mode = updates["mode"]
+            if "enabled" in updates:
+                job.enabled = bool(updates["enabled"])
+                schedule_changed = True
+            if "schedule" in updates:
+                sched = updates["schedule"]
+                kind = sched.get("kind", job.schedule.kind)
+                # Preserve existing tz unless explicitly overridden
+                tz = sched.get("tz", job.schedule.tz)
+                if kind == "every" and "every_seconds" in sched:
+                    job.schedule = CronSchedule(
+                        kind="every", every_ms=sched["every_seconds"] * 1000,
+                    )
+                    schedule_changed = True
+                elif kind == "cron" and "cron_expr" in sched:
+                    job.schedule = CronSchedule(
+                        kind="cron", expr=sched["cron_expr"], tz=tz,
+                    )
+                    schedule_changed = True
+
+            if schedule_changed and job.enabled:
+                job.state.next_run_at_ms = _compute_next_run(job.schedule, _now_ms())
+            elif schedule_changed and not job.enabled:
+                job.state.next_run_at_ms = None
+
+            job.updated_at_ms = _now_ms()
+            self._save_store()
+            self._arm_timer()
+            return job
+
+        return None
+
     async def run_job(self, job_id: str, force: bool = False) -> bool:
         """Manually run a job."""
         store = self._load_store()
