@@ -107,12 +107,22 @@ async def test_set_action_warm_field(config_tool):
         patch(LOAD_CREDS_HELPERS, return_value=creds),
     ):
         result = await config_tool.execute(
-            action="set", path="agents.defaults.model", value="openai/gpt-4"
+            action="set", path="agents.defaults.model", value="openai/gpt-5.2"
         )
 
     data = json.loads(result)
     assert data["status"] == "saved"
     assert "restart" in data["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_set_model_rejects_unknown(config_tool):
+    with patch(LOAD_CONFIG, return_value=Config()):
+        result = await config_tool.execute(
+            action="set", path="agents.defaults.model", value="openai/gpt-4"
+        )
+    assert "Error" in result
+    assert "not available" in result
 
 
 @pytest.mark.asyncio
@@ -247,7 +257,7 @@ async def test_set_config_blocked_by_missing_credential(config_tool):
         patch(LOAD_CREDS_HELPERS, return_value=creds),
     ):
         result = await config_tool.execute(
-            action="set", path="agents.defaults.model", value="gemini/gemini-2.5-pro"
+            action="set", path="agents.defaults.model", value="gemini/gemini-3-pro-preview"
         )
     assert "Error" in result
     assert "Blocked" in result

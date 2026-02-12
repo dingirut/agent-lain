@@ -168,6 +168,18 @@ class ConfigTool(Tool):
             set_by_path(config, path, value)
             new_value = get_by_path(config, path)
 
+            # Validate model against known provider models
+            if path == "agents.defaults.model":
+                from ragnarbot.config.providers import PROVIDERS
+
+                all_model_ids = [
+                    m["id"] for p in PROVIDERS for m in p["models"]
+                ]
+                if new_value not in all_model_ids:
+                    set_by_path(config, path, old_value)
+                    models_list = ", ".join(all_model_ids)
+                    return f"Error: model '{new_value}' is not available. Choose from: {models_list}"
+
             # Check credential dependencies before persisting
             dep_error = check_config_dependency(path, str(new_value))
             if dep_error:
