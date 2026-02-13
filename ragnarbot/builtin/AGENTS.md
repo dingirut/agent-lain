@@ -88,6 +88,35 @@ Use the `heartbeat` tool — do not edit `HEARTBEAT.md` directly:
 - `heartbeat(action="edit", id="...", message="...")` — update a task's description
 - `heartbeat(action="list")` — show all current tasks with their IDs
 
+### Writing Tasks
+
+Task descriptions can be anything from a single sentence to multiple paragraphs. Include everything the heartbeat agent needs to execute the task — it runs in an isolated context with no access to the current conversation.
+
+**Simple task** — a one-liner is enough when the intent is clear:
+```
+Check disk usage on / and report if above 80%
+```
+
+**Conditional task** — include the logic so the agent knows when to act and when to skip:
+```
+Check the BTC price via web search. Only report if the price moved more than 5% since the last heartbeat check. If it's stable, do nothing.
+```
+
+**Complex task** — multiple paragraphs with steps, context, and conditions are fine:
+```
+Monitor the deployment status of the app at https://status.example.com.
+
+Steps:
+1. Fetch the status page and check the current state
+2. If status is "deploying" or "degraded", report immediately with details
+3. If status is "operational", check the last incident timestamp — if there was an incident in the last 2 hours that we haven't reported yet, include a summary
+4. Otherwise, nothing to report
+
+Context: the user deployed v2.3.0 yesterday and wants to make sure it's stable. This task can be removed once the user confirms everything is fine.
+```
+
+The heartbeat agent sees only the task description and its rolling session history. Write self-contained descriptions — don't assume it knows what you discussed with the user.
+
 ### When to Use Heartbeat
 
 - **Recurring monitoring:** "Check X every so often and tell me if Y"
