@@ -396,14 +396,7 @@ class TelegramChannel(BaseChannel):
                 )
             return
 
-        # Intermediate message — send text but keep typing active
-        is_intermediate = msg.metadata.get("intermediate", False)
-
-        # Final message — stop typing first (unless keep_typing is set)
-        if not is_intermediate and not msg.metadata.get("keep_typing"):
-            self._stop_typing(chat_id)
-
-        # --- Reaction handling ---
+        # --- Reaction handling (does not interrupt typing) ---
         if msg.metadata.get("reaction"):
             try:
                 from telegram import ReactionTypeEmoji
@@ -415,6 +408,13 @@ class TelegramChannel(BaseChannel):
             except Exception as e:
                 logger.error(f"Error setting reaction: {e}")
             return
+
+        # Intermediate message — send text but keep typing active
+        is_intermediate = msg.metadata.get("intermediate", False)
+
+        # Final message — stop typing first (unless keep_typing is set)
+        if not is_intermediate and not msg.metadata.get("keep_typing"):
+            self._stop_typing(chat_id)
 
         # --- Media sending ---
         media_type = msg.metadata.get("media_type")
