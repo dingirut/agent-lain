@@ -19,6 +19,7 @@ from ragnarbot.providers.transcription import TranscriptionError, TranscriptionP
 
 BOT_COMMANDS = [
     ("new", "Start a new conversation"),
+    ("stop", "Stop agent response"),
     ("context", "Show context usage"),
     ("context_mode", "Change context mode"),
 ]
@@ -264,6 +265,7 @@ class TelegramChannel(BaseChannel):
         from telegram.ext import CallbackQueryHandler, CommandHandler
         self._app.add_handler(CommandHandler("start", self._on_start))
         self._app.add_handler(CommandHandler("new", self._on_new))
+        self._app.add_handler(CommandHandler("stop", self._on_stop))
         self._app.add_handler(CommandHandler("context", self._on_context))
         self._app.add_handler(CommandHandler("context_mode", self._on_context_mode))
         self._app.add_handler(CallbackQueryHandler(
@@ -553,6 +555,30 @@ class TelegramChannel(BaseChannel):
             content="/context",
             metadata={
                 "command": "context_info",
+                "message_id": update.message.message_id,
+                "user_id": user.id,
+                "username": user.username,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+            },
+        )
+
+    async def _on_stop(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /stop command — stop the current agent response."""
+        if not update.message or not update.effective_user:
+            return
+        user = update.effective_user
+        chat_id = update.message.chat_id
+        sender_id = str(user.id)
+        if user.username:
+            sender_id = f"{sender_id}|{user.username}"
+        self._chat_ids[sender_id] = chat_id
+        await self._handle_message(
+            sender_id=sender_id,
+            chat_id=str(chat_id),
+            content="/stop",
+            metadata={
+                "command": "stop",
                 "message_id": update.message.message_id,
                 "user_id": user.id,
                 "username": user.username,

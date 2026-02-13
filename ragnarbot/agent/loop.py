@@ -56,7 +56,7 @@ class AgentLoop:
     5. Sends responses back
     """
 
-    READ_ONLY_COMMANDS = frozenset({"context_info", "context_mode"})
+    READ_ONLY_COMMANDS = frozenset({"context_info", "context_mode", "stop"})
 
     def __init__(
         self,
@@ -116,6 +116,8 @@ class AgentLoop:
 
         self._running = False
         self._restart_requested = False
+        self._stop_events: dict[str, asyncio.Event] = {}
+        self._processing_session_key: str | None = None
         self._register_default_tools()
     
     def _register_default_tools(self) -> None:
@@ -236,6 +238,21 @@ class AgentLoop:
         self._restart_requested = True
         logger.info("Restart requested — will restart after current processing completes")
 
+    def _is_stopped(self, session_key: str) -> bool:
+        event = self._stop_events.get(session_key)
+        return event is not None and event.is_set()
+
+    def _request_stop(self, session_key: str) -> bool:
+        """Returns True if there was something to stop."""
+        if (self._processing_task and not self._processing_task.done()
+                and self._processing_session_key == session_key):
+            self._stop_events.setdefault(session_key, asyncio.Event()).set()
+            return True
+        return False
+
+    def _clear_stop(self, session_key: str):
+        self._stop_events.pop(session_key, None)
+
     def _reap_processing_task(self):
         """Check for completed/failed background task."""
         if self._processing_task and self._processing_task.done():
@@ -261,26 +278,38 @@ class AgentLoop:
         """Run processing and publish response (background task wrapper)."""
         if system:
             msg = batch_or_msg
-            try:
-                response = await self._process_system_message(msg)
-                if response:
-                    await self.bus.publish_outbound(response)
-            except Exception as e:
-                logger.error(f"Error processing system message: {e}")
+            parts = msg.chat_id.split(":", 1) if ":" in msg.chat_id else ("cli", msg.chat_id)
+            session_key = f"{parts[0]}:{parts[1]}"
         else:
             batch = batch_or_msg
             msg = batch[0]
-            try:
-                response = await self._process_batch(batch)
-                if response:
-                    await self.bus.publish_outbound(response)
-            except Exception as e:
-                logger.error(f"Error processing message: {e}")
-                await self.bus.publish_outbound(OutboundMessage(
-                    channel=msg.channel,
-                    chat_id=msg.chat_id,
-                    content=f"Sorry, I encountered an error: {str(e)}"
-                ))
+            session_key = f"{msg.channel}:{msg.chat_id}"
+
+        self._processing_session_key = session_key
+        self._clear_stop(session_key)
+
+        try:
+            if system:
+                try:
+                    response = await self._process_system_message(msg)
+                    if response:
+                        await self.bus.publish_outbound(response)
+                except Exception as e:
+                    logger.error(f"Error processing system message: {e}")
+            else:
+                try:
+                    response = await self._process_batch(batch)
+                    if response:
+                        await self.bus.publish_outbound(response)
+                except Exception as e:
+                    logger.error(f"Error processing message: {e}")
+                    await self.bus.publish_outbound(OutboundMessage(
+                        channel=msg.channel,
+                        chat_id=msg.chat_id,
+                        content=f"Sorry, I encountered an error: {str(e)}"
+                    ))
+        finally:
+            self._processing_session_key = None
 
     async def _debounce(self, first: InboundMessage) -> list[InboundMessage]:
         """Collect rapid-fire messages from the same session into a batch.
@@ -493,11 +522,19 @@ class AgentLoop:
         new_start = len(messages) - len(batch)
 
         # Agent loop
+        session_key = f"{msg.channel}:{msg.chat_id}"
         final_content = None
         compacted_this_turn = False
+        stopped = False
 
         try:
             while True:
+
+                # CHECKPOINT 1 — before LLM call
+                if self._is_stopped(session_key):
+                    logger.info(f"Stop requested before LLM call for {session_key}")
+                    stopped = True
+                    break
 
                 # Cache flush escalation (if TTL expired)
                 flushed = False
@@ -562,6 +599,30 @@ class AgentLoop:
                 self.cache_manager.mark_cache_created(session, response.usage)
 
                 if response.has_tool_calls:
+                    # CHECKPOINT 2 — after LLM returns tool_calls, before execution
+                    if self._is_stopped(session_key):
+                        logger.info(f"Stop requested before tool execution for {session_key}")
+                        stopped = True
+                        tool_call_dicts = [
+                            {
+                                "id": tc.id,
+                                "type": "function",
+                                "function": {
+                                    "name": tc.name,
+                                    "arguments": json.dumps(tc.arguments)
+                                }
+                            }
+                            for tc in response.tool_calls
+                        ]
+                        messages = self.context.add_assistant_message(
+                            messages, response.content, tool_call_dicts
+                        )
+                        for tc in response.tool_calls:
+                            messages = self.context.add_tool_result(
+                                messages, tc.id, tc.name, "[Stopped by user]"
+                            )
+                        break
+
                     if self.stream_steps and response.content:
                         await self.bus.publish_outbound(OutboundMessage(
                             channel=msg.channel,
@@ -585,13 +646,29 @@ class AgentLoop:
                         messages, response.content, tool_call_dicts
                     )
 
-                    for tool_call in response.tool_calls:
+                    for idx, tool_call in enumerate(response.tool_calls):
+                        # CHECKPOINT 3 — before each individual tool execution
+                        if self._is_stopped(session_key):
+                            logger.info(
+                                f"Stop requested during tool execution for {session_key}"
+                            )
+                            stopped = True
+                            for remaining in response.tool_calls[idx:]:
+                                messages = self.context.add_tool_result(
+                                    messages, remaining.id, remaining.name,
+                                    "[Stopped by user]"
+                                )
+                            break
+
                         args_str = json.dumps(tool_call.arguments)
                         logger.debug(f"Executing tool: {tool_call.name} with arguments: {args_str}")
                         result = await self.tools.execute(tool_call.name, tool_call.arguments)
                         messages = self.context.add_tool_result(
                             messages, tool_call.id, tool_call.name, result
                         )
+
+                    if stopped:
+                        break
                 else:
                     final_content = response.content
                     break
@@ -600,7 +677,8 @@ class AgentLoop:
             # should_flush() sees the correct created_at on the next turn.
             self.sessions.save(session)
 
-        messages.append({"role": "assistant", "content": final_content or ""})
+        if not stopped:
+            messages.append({"role": "assistant", "content": final_content or ""})
 
         # -- Save new messages to session --
         # User messages come first (one per batch item), then assistant/tool messages.
@@ -632,7 +710,7 @@ class AgentLoop:
                 )
         self.sessions.save(session)
 
-        if not final_content:
+        if stopped or not final_content:
             return None
 
         return OutboundMessage(
@@ -645,6 +723,8 @@ class AgentLoop:
         """Dispatch a channel command without calling the LLM."""
         if command == "new_chat":
             return self._handle_new_chat(msg)
+        if command == "stop":
+            return self._handle_stop(msg)
         if command == "context_mode":
             return self._handle_context_mode(msg)
         if command == "set_context_mode":
@@ -672,6 +752,21 @@ class AgentLoop:
             chat_id=msg.chat_id,
             content=f"✨ <b>New chat started</b>\n\n🤖 Model: <code>{self.model}</code>",
             metadata={"raw_html": True},
+        )
+
+    def _handle_stop(self, msg: InboundMessage) -> OutboundMessage:
+        """Stop the currently running agent response for this session."""
+        session_key = f"{msg.channel}:{msg.chat_id}"
+        if self._request_stop(session_key):
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content="✋ Agent response stopped",
+            )
+        return OutboundMessage(
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            content="Nothing to stop.",
         )
 
     def _handle_context_mode(self, msg: InboundMessage) -> OutboundMessage:
@@ -832,9 +927,16 @@ class AgentLoop:
         # Agent loop
         final_content = None
         compacted_this_turn = False
+        stopped = False
 
         try:
             while True:
+
+                # CHECKPOINT 1 — before LLM call
+                if self._is_stopped(session_key):
+                    logger.info(f"Stop requested before LLM call for {session_key}")
+                    stopped = True
+                    break
 
                 # Cache flush escalation (if TTL expired)
                 flushed = False
@@ -896,6 +998,32 @@ class AgentLoop:
                 self.cache_manager.mark_cache_created(session, response.usage)
 
                 if response.has_tool_calls:
+                    # CHECKPOINT 2 — after LLM returns tool_calls, before execution
+                    if self._is_stopped(session_key):
+                        logger.info(
+                            f"Stop requested before tool execution for {session_key}"
+                        )
+                        stopped = True
+                        tool_call_dicts = [
+                            {
+                                "id": tc.id,
+                                "type": "function",
+                                "function": {
+                                    "name": tc.name,
+                                    "arguments": json.dumps(tc.arguments)
+                                }
+                            }
+                            for tc in response.tool_calls
+                        ]
+                        messages = self.context.add_assistant_message(
+                            messages, response.content, tool_call_dicts
+                        )
+                        for tc in response.tool_calls:
+                            messages = self.context.add_tool_result(
+                                messages, tc.id, tc.name, "[Stopped by user]"
+                            )
+                        break
+
                     # Stream intermediate content to user if enabled
                     if self.stream_steps and response.content:
                         await self.bus.publish_outbound(OutboundMessage(
@@ -920,21 +1048,38 @@ class AgentLoop:
                         messages, response.content, tool_call_dicts
                     )
 
-                    for tool_call in response.tool_calls:
+                    for idx, tool_call in enumerate(response.tool_calls):
+                        # CHECKPOINT 3 — before each individual tool execution
+                        if self._is_stopped(session_key):
+                            logger.info(
+                                f"Stop requested during tool execution for {session_key}"
+                            )
+                            stopped = True
+                            for remaining in response.tool_calls[idx:]:
+                                messages = self.context.add_tool_result(
+                                    messages, remaining.id, remaining.name,
+                                    "[Stopped by user]"
+                                )
+                            break
+
                         args_str = json.dumps(tool_call.arguments)
                         logger.debug(f"Executing tool: {tool_call.name} with arguments: {args_str}")
                         result = await self.tools.execute(tool_call.name, tool_call.arguments)
                         messages = self.context.add_tool_result(
                             messages, tool_call.id, tool_call.name, result
                         )
+
+                    if stopped:
+                        break
                 else:
                     final_content = response.content
                     break
         finally:
             self.sessions.save(session)
 
-        # Add final assistant message to the messages list
-        messages.append({"role": "assistant", "content": final_content or ""})
+        if not stopped:
+            # Add final assistant message to the messages list
+            messages.append({"role": "assistant", "content": final_content or ""})
 
         # Override the user message content to mark it as system
         messages[new_start]["content"] = f"[System: {msg.sender_id}] {msg.content}"
@@ -958,7 +1103,7 @@ class AgentLoop:
             session.add_message(m["role"], m.get("content"), msg_metadata=user_meta, **extras)
         self.sessions.save(session)
 
-        if not final_content:
+        if stopped or not final_content:
             return None
 
         return OutboundMessage(
