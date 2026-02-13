@@ -75,6 +75,7 @@ class AgentLoop:
         debounce_seconds: float = 0.5,
         max_context_tokens: int = 200_000,
         context_mode: str = "normal",
+        heartbeat_interval_m: int = 30,
     ):
         from ragnarbot.config.schema import ExecToolConfig
         from ragnarbot.cron.service import CronService
@@ -99,7 +100,7 @@ class AgentLoop:
             model=self.model,
         )
 
-        self.context = ContextBuilder(workspace)
+        self.context = ContextBuilder(workspace, heartbeat_interval_m=heartbeat_interval_m)
         self.sessions = SessionManager(workspace)
         self.tools = ToolRegistry()
         self.subagents = SubagentManager(
@@ -534,6 +535,11 @@ class AgentLoop:
                     current_meta[k] = m.metadata[k]
             prefix = _build_message_prefix(current_meta, include_timestamp=is_first)
             prefixed_content = prefix + m.content if prefix else m.content
+
+            # Append ephemeral system note (visible to LLM only, not saved to session)
+            system_note = m.metadata.get("system_note")
+            if system_note:
+                prefixed_content += f"\n\n{system_note}"
 
             batch_data.append({
                 "prefixed_content": prefixed_content,

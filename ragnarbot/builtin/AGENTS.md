@@ -66,7 +66,7 @@ Today's daily note is automatically injected into your system prompt alongside `
 
 ## Heartbeat Protocol
 
-`{workspace_path}/HEARTBEAT.md` is your periodic task list. The system checks it every 30 minutes. If it contains tasks, the system executes them in an isolated context and delivers results to the user's active chat. If the file is empty, the heartbeat is skipped silently.
+`{workspace_path}/HEARTBEAT.md` is your periodic task list. The system checks it every {heartbeat_interval_m} minutes (configured in `heartbeat.intervalM`). If it contains tasks, the system executes them in an isolated context and delivers results to the user's active chat. If the file is empty, the heartbeat is skipped silently.
 
 ### Heartbeat Reports
 

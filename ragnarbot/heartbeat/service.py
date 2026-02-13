@@ -8,8 +8,7 @@ from loguru import logger
 
 from ragnarbot.agent.tools.heartbeat import parse_blocks
 
-# Default interval: 30 minutes
-DEFAULT_HEARTBEAT_INTERVAL_S = 30 * 60
+DEFAULT_HEARTBEAT_INTERVAL_M = 30
 
 
 def _is_heartbeat_empty(content: str | None) -> bool:
@@ -34,14 +33,14 @@ class HeartbeatService:
         on_heartbeat: Callable[[], Coroutine[Any, Any, tuple[str | None, str | None, str | None]]] | None = None,
         on_deliver: Callable[[str, str, str], Coroutine[Any, Any, None]] | None = None,
         on_complete: Callable[[str | None, str | None], Coroutine[Any, Any, None]] | None = None,
-        interval_s: int = DEFAULT_HEARTBEAT_INTERVAL_S,
+        interval_m: int = DEFAULT_HEARTBEAT_INTERVAL_M,
         enabled: bool = True,
     ):
         self.workspace = workspace
         self.on_heartbeat = on_heartbeat
         self.on_deliver = on_deliver
         self.on_complete = on_complete
-        self.interval_s = interval_s
+        self.interval_s = interval_m * 60
         self.enabled = enabled
         self._running = False
         self._task: asyncio.Task | None = None

@@ -245,6 +245,7 @@ def gateway_main(
         debounce_seconds=config.agents.defaults.debounce_seconds,
         max_context_tokens=config.agents.defaults.max_context_tokens,
         context_mode=config.agents.defaults.context_mode,
+        heartbeat_interval_m=config.heartbeat.interval_m,
     )
 
     # Set cron callback (needs agent)
@@ -346,7 +347,14 @@ def gateway_main(
             sender_id="heartbeat",
             chat_id=chat_id,
             content=f"[Heartbeat report]\n---\n{result}",
-            metadata={"heartbeat_result": True},
+            metadata={
+                "heartbeat_result": True,
+                "system_note": (
+                    "[System] This is an internal message — the user does not see it. "
+                    "Relay the results to the user naturally, in the tone and context "
+                    "of your conversation. Do not mention the heartbeat mechanism."
+                ),
+            },
         ))
 
     async def on_heartbeat_complete(channel: str | None, chat_id: str | None):
@@ -365,8 +373,8 @@ def gateway_main(
         on_heartbeat=on_heartbeat,
         on_deliver=on_heartbeat_deliver,
         on_complete=on_heartbeat_complete,
-        interval_s=30 * 60,
-        enabled=True,
+        interval_m=config.heartbeat.interval_m,
+        enabled=config.heartbeat.enabled,
     )
 
     # Create channel manager
@@ -381,7 +389,8 @@ def gateway_main(
     if cron_status["jobs"] > 0:
         console.print(f"[green]✓[/green] Cron: {cron_status['jobs']} scheduled jobs")
 
-    console.print("[green]✓[/green] Heartbeat: every 30m")
+    hb_status = f"every {config.heartbeat.interval_m}m" if config.heartbeat.enabled else "disabled"
+    console.print(f"[green]✓[/green] Heartbeat: {hb_status}")
 
     pid_path = Path.home() / ".ragnarbot" / "gateway.pid"
 

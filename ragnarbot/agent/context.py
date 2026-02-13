@@ -24,8 +24,9 @@ class ContextBuilder:
     BUILTIN_FILES = ["SOUL.md", "AGENTS.md", "BUILTIN_TOOLS.md"]
     BOOTSTRAP_FILES = ["IDENTITY.md", "USER.md", "TOOLS.md"]
 
-    def __init__(self, workspace: Path):
+    def __init__(self, workspace: Path, heartbeat_interval_m: int = 30):
         self.workspace = workspace
+        self.heartbeat_interval_m = heartbeat_interval_m
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace)
         self._ensure_bootstrap_files()
@@ -138,6 +139,7 @@ Skills with available="false" need dependencies installed first - you can try in
                 content = content.format(
                     workspace_path=workspace_path,
                     timezone=timezone,
+                    heartbeat_interval_m=self.heartbeat_interval_m,
                 )
                 parts.append(content)
         return "\n\n---\n\n".join(parts) if parts else ""

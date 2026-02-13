@@ -141,12 +141,26 @@ class TranscriptionConfig(BaseModel):
     )
 
 
+class HeartbeatConfig(BaseModel):
+    """Heartbeat periodic task configuration."""
+    enabled: bool = Field(
+        default=True,
+        json_schema_extra={"reload": "warm", "label": "Enable periodic heartbeat checks"},
+    )
+    interval_m: int = Field(
+        default=30,
+        ge=1,
+        json_schema_extra={"reload": "warm", "label": "Heartbeat check interval (minutes)"},
+    )
+
+
 class Config(BaseSettings):
     """Root configuration for ragnarbot."""
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
     daemon: DaemonConfig = Field(default_factory=DaemonConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
+    heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     transcription: TranscriptionConfig = Field(default_factory=TranscriptionConfig)
 
