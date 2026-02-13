@@ -26,12 +26,22 @@ BOT_COMMANDS = [
 
 
 async def set_bot_commands(bot) -> None:
-    """Set the bot command menu. Single source of truth for all command lists."""
+    """Set the bot command menu if it differs from the desired state."""
     from loguru import logger as _log
     from telegram import BotCommand
-    commands = [BotCommand(cmd, desc) for cmd, desc in BOT_COMMANDS]
-    await bot.set_my_commands(commands)
-    _log.info(f"Bot commands set: {[c.command for c in commands]}")
+
+    desired = [(cmd, desc) for cmd, desc in BOT_COMMANDS]
+    current_cmds = await bot.get_my_commands()
+    current = [(c.command, c.description) for c in current_cmds]
+
+    if current == desired:
+        _log.info(f"Bot commands up to date: {[c for c, _ in current]}")
+        return
+
+    await bot.set_my_commands([BotCommand(cmd, desc) for cmd, desc in desired])
+    _log.info(
+        f"Bot commands updated: {[c for c, _ in current]} → {[c for c, _ in desired]}"
+    )
 
 
 def _markdown_to_telegram_html(text: str) -> str:
