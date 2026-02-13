@@ -344,6 +344,13 @@ class AgentLoop:
                     response = await self._process_system_message(msg)
                     if response:
                         await self.bus.publish_outbound(response)
+                    else:
+                        await self.bus.publish_outbound(OutboundMessage(
+                            channel=parts[0],
+                            chat_id=parts[1],
+                            content="",
+                            metadata={"stop_typing": True},
+                        ))
                 except Exception as e:
                     logger.error(f"Error processing system message: {e}")
             else:
@@ -351,6 +358,13 @@ class AgentLoop:
                     response = await self._process_batch(batch)
                     if response:
                         await self.bus.publish_outbound(response)
+                    else:
+                        await self.bus.publish_outbound(OutboundMessage(
+                            channel=msg.channel,
+                            chat_id=msg.chat_id,
+                            content="",
+                            metadata={"stop_typing": True},
+                        ))
                 except Exception as e:
                     logger.error(f"Error processing message: {e}")
                     await self.bus.publish_outbound(OutboundMessage(
