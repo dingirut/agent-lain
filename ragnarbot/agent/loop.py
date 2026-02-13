@@ -41,7 +41,7 @@ class AgentLoop:
     5. Sends responses back
     """
 
-    READ_ONLY_COMMANDS = frozenset({"context_info", "context_mode"})
+    READ_ONLY_COMMANDS = frozenset({"context_info", "context_mode", "list_sessions"})
 
     def __init__(
         self,
@@ -588,6 +588,12 @@ class AgentLoop:
             return self._handle_set_context_mode(msg)
         if command == "context_info":
             return self._handle_context_info(msg)
+        if command == "list_sessions":
+            return self._handle_list_sessions(msg)
+        if command == "resume_session":
+            return self._handle_resume_session(msg)
+        if command == "delete_session":
+            return self._handle_delete_session(msg)
         logger.warning(f"Unknown command: {command}")
         return None
 
@@ -718,6 +724,143 @@ class AgentLoop:
                 },
             },
         )
+
+    def _handle_list_sessions(self, msg: InboundMessage) -> OutboundMessage:
+        """Return a list of all web sessions for the sidebar."""
+        all_sessions = self.sessions.list_sessions()
+        result = []
+        for sess in all_sessions:
+            uk = sess.get("user_key", "")
+            if not uk.startswith("web:"):
+                continue
+            chat_id = uk[4:]  # strip "web:"
+            session_id = sess["session_id"]
+
+            # Read first user message as preview
+            preview = ""
+            msg_count = 0
+            loaded = self.sessions._load(session_id, uk)
+            if loaded:
+                msg_count = sum(1 for m in loaded.messages if m.get("role") in ("user", "assistant"))
+                for m in loaded.messages:
+                    if m.get("role") == "user":
+                        text = m.get("content", "")
+                        # Strip prefix tags (lines starting with [ or > or ---)
+                        lines = text.split("\n")
+                        clean = []
+                        for ln in lines:
+                            stripped = ln.strip()
+                            if stripped.startswith("[") or stripped.startswith(">") or stripped == "---":
+                                continue
+                            if stripped:
+                                clean.append(stripped)
+                        preview = " ".join(clean)[:80]
+                        break
+
+            active = self.sessions.get_active_id(uk) == session_id
+
+            result.append({
+                "session_id": session_id,
+                "chat_id": chat_id,
+                "updated_at": sess.get("updated_at", ""),
+                "preview": preview,
+                "active": active,
+                "msg_count": msg_count,
+            })
+
+        return OutboundMessage(
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            content="",
+            metadata={"session_list": result},
+        )
+
+    def _handle_resume_session(self, msg: InboundMessage) -> OutboundMessage | None:
+        """Switch to an existing web session."""
+        session_id = msg.metadata.get("session_id", "")
+        if not session_id:
+            return None
+
+        # Try to load the session to verify it exists and is a web session
+        # We don't know the user_key yet, so scan for it
+        session = None
+        for sess_info in self.sessions.list_sessions():
+            if sess_info["session_id"] == session_id:
+                uk = sess_info.get("user_key", "")
+                if uk.startswith("web:"):
+                    session = self.sessions._load(session_id, uk)
+                break
+
+        if not session or not session.user_key.startswith("web:"):
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content="",
+                metadata={"error": "Session not found"},
+            )
+
+        chat_id = session.user_key[4:]  # strip "web:"
+        self.sessions.set_active(session.user_key, session_id)
+        self.sessions._cache[session_id] = session
+
+        # Build message history for the frontend
+        history = []
+        for m in session.messages:
+            role = m.get("role")
+            if role not in ("user", "assistant"):
+                continue
+            content = m.get("content", "")
+            # Strip prefix tags from user messages
+            if role == "user":
+                lines = content.split("\n")
+                clean = []
+                for ln in lines:
+                    stripped = ln.strip()
+                    if stripped.startswith("[") or stripped.startswith(">") or stripped == "---":
+                        continue
+                    if stripped:
+                        clean.append(stripped)
+                content = "\n".join(clean)
+            if content:
+                history.append({"role": role, "content": content})
+
+        return OutboundMessage(
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            content="",
+            metadata={"session_resumed": {
+                "session_id": session_id,
+                "chat_id": chat_id,
+                "history": history,
+            }},
+        )
+
+    def _handle_delete_session(self, msg: InboundMessage) -> OutboundMessage | None:
+        """Delete a web session."""
+        session_id = msg.metadata.get("session_id", "")
+        if not session_id:
+            return None
+
+        # Verify it's a web session before deleting
+        for sess_info in self.sessions.list_sessions():
+            if sess_info["session_id"] == session_id:
+                uk = sess_info.get("user_key", "")
+                if not uk.startswith("web:"):
+                    return None
+                # If this is the active session for that user_key, clear the pointer
+                if self.sessions.get_active_id(uk) == session_id:
+                    active_path = self.sessions._get_active_path(uk)
+                    if active_path.exists():
+                        active_path.unlink()
+                self.sessions.delete(session_id)
+                return OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content="",
+                    metadata={"session_deleted": {"session_id": session_id}},
+                )
+
+        return None
 
     async def _process_system_message(self, msg: InboundMessage) -> OutboundMessage | None:
         """

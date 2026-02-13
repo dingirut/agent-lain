@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{{title}}</title>
+<link rel="icon" type="image/png" href="/static/favicon.png">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.1/marked.min.js" defer crossorigin="anonymous"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js" defer crossorigin="anonymous"></script>
@@ -32,15 +33,20 @@
   html, body {
     height: 100%;
     overflow: hidden;
+    overscroll-behavior: none;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
     background: var(--bg);
     color: var(--text);
   }
 
   #app {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
     display: flex;
     flex-direction: column;
-    height: 100%;
     max-width: 800px;
     margin: 0 auto;
     overflow: hidden;
@@ -60,6 +66,16 @@
 
   .header-left {
     flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .header-avatar {
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    object-fit: cover;
   }
 
   header .title {
@@ -165,11 +181,67 @@
     flex-shrink: 0;
   }
 
-  #new-chat-btn {
+  #sidebar-btn {
     background: none;
     border: 1px solid var(--border);
     color: var(--text-dim);
     padding: 5px 12px;
+    border-radius: 6px;
+    font-size: 16px;
+    cursor: pointer;
+    transition: all 0.15s;
+    line-height: 1;
+  }
+
+  #sidebar-btn:hover {
+    border-color: var(--accent);
+    color: var(--text);
+  }
+
+  /* Sidebar */
+  #sidebar-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 99;
+  }
+
+  #sidebar-overlay.open { display: block; }
+
+  #sidebar {
+    position: fixed;
+    left: -300px;
+    top: 0;
+    bottom: 0;
+    width: 280px;
+    z-index: 100;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    transition: left 0.2s ease;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  #sidebar.open { left: 0; }
+
+  .sidebar-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+    font-size: 15px;
+    font-weight: 600;
+    flex-shrink: 0;
+  }
+
+  #new-chat-btn {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    padding: 4px 10px;
     border-radius: 6px;
     font-size: 12px;
     cursor: pointer;
@@ -179,6 +251,91 @@
   #new-chat-btn:hover {
     border-color: var(--accent);
     color: var(--text);
+  }
+
+  #session-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+  }
+
+  #session-list::-webkit-scrollbar { width: 4px; }
+  #session-list::-webkit-scrollbar-track { background: transparent; }
+  #session-list::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 2px; }
+
+  .session-item {
+    padding: 10px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.15s;
+    margin-bottom: 2px;
+  }
+
+  .session-item:hover { background: var(--surface-2); }
+
+  .session-item.active {
+    background: rgba(108,92,231,0.12);
+    border-left: 3px solid var(--accent);
+  }
+
+  .session-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .session-info {
+    flex: 1;
+    min-width: 0;
+    cursor: pointer;
+  }
+
+  .session-delete {
+    flex-shrink: 0;
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    font-size: 16px;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 4px;
+    opacity: 0;
+    transition: opacity 0.15s, color 0.15s, background 0.15s;
+  }
+
+  .session-item:hover .session-delete { opacity: 0.7; }
+  .session-delete:hover { opacity: 1 !important; color: var(--danger); background: rgba(231,76,60,0.1); }
+
+  .session-preview {
+    font-size: 13px;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .session-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 4px;
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+
+  .session-badge {
+    font-size: 10px;
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: rgba(108,92,231,0.2);
+    color: var(--accent);
+  }
+
+  .session-empty {
+    padding: 20px;
+    text-align: center;
+    color: var(--text-dim);
+    font-size: 13px;
   }
 
   /* Messages */
@@ -204,7 +361,21 @@
   }
 
   .msg-wrapper.user { align-self: flex-end; }
-  .msg-wrapper.bot { align-self: flex-start; }
+  .msg-wrapper.bot { align-self: flex-start; flex-direction: row; align-items: flex-start; gap: 8px; }
+
+  .bot-avatar {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    object-fit: cover;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+
+  .msg-body {
+    min-width: 0;
+    flex: 1;
+  }
 
   .msg {
     padding: 10px 14px;
@@ -443,8 +614,11 @@
 <div id="app">
   <header>
     <div class="header-left">
-      <div class="title">{{title}}</div>
-      <div class="status"><span class="dot" id="status-dot"></span><span id="status-text">connecting</span></div>
+      <img class="header-avatar" src="/static/avatar.jpg" alt="">
+      <div>
+        <div class="title">{{title}}</div>
+        <div class="status"><span class="dot" id="status-dot"></span><span id="status-text">connecting</span></div>
+      </div>
     </div>
     <div class="header-center" id="context-panel">
       <div class="context-bar">
@@ -458,9 +632,17 @@
       </div>
     </div>
     <div class="header-right">
-      <button id="new-chat-btn">New Chat</button>
+      <button id="sidebar-btn" title="Chats">&#9776;</button>
     </div>
   </header>
+  <div id="sidebar-overlay"></div>
+  <div id="sidebar">
+    <div class="sidebar-header">
+      <span>Chats</span>
+      <button id="new-chat-btn">+ New</button>
+    </div>
+    <div id="session-list"></div>
+  </div>
   <div id="messages">
     <div id="typing"><span>Thinking</span></div>
   </div>
@@ -495,6 +677,10 @@ document.addEventListener("DOMContentLoaded", function() {
   const inputEl = document.getElementById("input");
   const sendBtn = document.getElementById("send-btn");
   const newChatBtn = document.getElementById("new-chat-btn");
+  const sidebarBtn = document.getElementById("sidebar-btn");
+  const sidebar = document.getElementById("sidebar");
+  const sidebarOverlay = document.getElementById("sidebar-overlay");
+  const sessionListEl = document.getElementById("session-list");
   const statusDot = document.getElementById("status-dot");
   const statusText = document.getElementById("status-text");
   const contextPanel = document.getElementById("context-panel");
@@ -639,6 +825,21 @@ document.addEventListener("DOMContentLoaded", function() {
       case "reaction":
         showReaction(data.emoji, data.msg_id);
         break;
+
+      case "session_list":
+        renderSessionList(data.sessions || []);
+        break;
+
+      case "session_resumed":
+        handleSessionResumed(data);
+        break;
+
+      case "session_deleted":
+        // Re-fetch session list after deletion
+        if (connected) {
+          ws.send(JSON.stringify({ type: "command", command: "list_sessions" }));
+        }
+        break;
     }
   }
 
@@ -682,6 +883,136 @@ document.addEventListener("DOMContentLoaded", function() {
     el.appendChild(badge);
   }
 
+  // --- Sidebar ---
+  function openSidebar() {
+    sidebar.classList.add("open");
+    sidebarOverlay.classList.add("open");
+    if (connected) {
+      ws.send(JSON.stringify({ type: "command", command: "list_sessions" }));
+    }
+  }
+
+  function closeSidebar() {
+    sidebar.classList.remove("open");
+    sidebarOverlay.classList.remove("open");
+  }
+
+  sidebarBtn.addEventListener("click", function() {
+    if (sidebar.classList.contains("open")) closeSidebar();
+    else openSidebar();
+  });
+
+  sidebarOverlay.addEventListener("click", closeSidebar);
+
+  function renderSessionList(sessions) {
+    sessionListEl.innerHTML = "";
+    if (sessions.length === 0) {
+      sessionListEl.innerHTML = '<div class="session-empty">No chats yet</div>';
+      return;
+    }
+    sessions.forEach(function(s) {
+      var isCurrent = s.chat_id === chatId && s.active;
+      var item = document.createElement("div");
+      item.className = "session-item" + (isCurrent ? " active" : "");
+
+      var dateStr = "";
+      if (s.updated_at) {
+        try {
+          var d = new Date(s.updated_at);
+          dateStr = d.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" })
+            + " " + d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+        } catch(e) { dateStr = s.updated_at; }
+      }
+
+      var preview = s.preview || "(empty chat)";
+      if (preview.length > 50) preview = preview.substring(0, 50) + "\u2026";
+
+      var row = document.createElement("div");
+      row.className = "session-row";
+
+      var info = document.createElement("div");
+      info.className = "session-info";
+      info.innerHTML =
+        '<div class="session-preview">' + escapeHtml(preview) + '</div>' +
+        '<div class="session-meta">' +
+          '<span>' + dateStr + '</span>' +
+          (s.msg_count ? '<span>\u00B7 ' + s.msg_count + ' msgs</span>' : '') +
+          (isCurrent ? '<span class="session-badge">current</span>' : '') +
+        '</div>';
+
+      info.addEventListener("click", function() {
+        if (isCurrent) {
+          closeSidebar();
+          return;
+        }
+        ws.send(JSON.stringify({
+          type: "command",
+          command: "resume_session",
+          session_id: s.session_id,
+        }));
+      });
+
+      var delBtn = document.createElement("button");
+      delBtn.className = "session-delete";
+      delBtn.title = "Delete";
+      delBtn.textContent = "\u00D7";
+      delBtn.addEventListener("click", function(e) {
+        e.stopPropagation();
+        if (!confirm("Delete this chat?")) return;
+        ws.send(JSON.stringify({
+          type: "command",
+          command: "delete_session",
+          session_id: s.session_id,
+        }));
+      });
+
+      row.appendChild(info);
+      row.appendChild(delBtn);
+      item.appendChild(row);
+      sessionListEl.appendChild(item);
+    });
+  }
+
+  function escapeHtml(text) {
+    var div = document.createElement("div");
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  function handleSessionResumed(data) {
+    // Update chatId
+    chatId = data.chat_id;
+    localStorage.setItem(STORAGE_KEY, chatId);
+
+    // Clear current messages
+    messagesEl.querySelectorAll(".msg-wrapper").forEach(function(m) { m.remove(); });
+    typingEl.classList.remove("active");
+
+    // Reset state
+    localMsgCounter = 0;
+    pendingMsgIds = [];
+    msgIdMap = {};
+
+    // Render server-side history
+    var history = data.history || [];
+    // Clear localStorage history for this chat and rebuild from server
+    clearHistory();
+    history.forEach(function(h) {
+      var role = h.role === "assistant" ? "bot" : h.role;
+      addMessage(role, h.content, false, null, null, true);
+      // Save to localStorage so it persists on refresh
+      saveHistory(role, h.content, null);
+    });
+
+    // Re-connect WS with new chatId
+    if (connected) {
+      ws.send(JSON.stringify({ type: "command", command: "new_chat" }));
+      ws.send(JSON.stringify({ type: "hello", chat_id: chatId }));
+    }
+
+    closeSidebar();
+  }
+
   // --- Messages ---
   function addMessage(role, content, intermediate, attachments, media, fromHistory) {
     // If intermediate, replace previous intermediate message
@@ -699,6 +1030,17 @@ document.addEventListener("DOMContentLoaded", function() {
     wrapper.className = "msg-wrapper " + role + (intermediate ? " intermediate" : "");
     if (fromHistory) wrapper.style.animation = "none";
 
+    // Bot avatar
+    if (role === "bot") {
+      var avatarImg = document.createElement("img");
+      avatarImg.className = "bot-avatar";
+      avatarImg.src = "/static/avatar.jpg";
+      wrapper.appendChild(avatarImg);
+    }
+
+    var msgBody = document.createElement("div");
+    msgBody.className = "msg-body";
+
     var div = document.createElement("div");
     div.className = "msg";
 
@@ -713,7 +1055,7 @@ document.addEventListener("DOMContentLoaded", function() {
       div.textContent = content;
     }
 
-    wrapper.appendChild(div);
+    msgBody.appendChild(div);
 
     // Bot media (image from server)
     if (media && media.type === "image" && media.url) {
@@ -731,7 +1073,7 @@ document.addEventListener("DOMContentLoaded", function() {
         window.open(media.url, "_blank");
       });
       mediaDiv.appendChild(img);
-      wrapper.appendChild(mediaDiv);
+      msgBody.appendChild(mediaDiv);
     }
 
     // Show attachment previews in message (user uploads)
@@ -749,9 +1091,11 @@ document.addEventListener("DOMContentLoaded", function() {
           chip.textContent = (att.type === "voice" ? "\uD83C\uDF99 " : "\uD83D\uDCCE ") + att.filename;
           attDiv.appendChild(chip);
         }
-        wrapper.appendChild(attDiv);
+        msgBody.appendChild(attDiv);
       });
     }
+
+    wrapper.appendChild(msgBody);
 
     // Assign local ID for user messages (for reaction targeting)
     if (role === "user") {
@@ -991,6 +1335,24 @@ document.addEventListener("DOMContentLoaded", function() {
     }
   });
 
+  // --- Paste images from clipboard ---
+  document.addEventListener("paste", function(e) {
+    var items = e.clipboardData && e.clipboardData.items;
+    if (!items) return;
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].type.indexOf("image/") === 0) {
+        e.preventDefault();
+        var blob = items[i].getAsFile();
+        if (blob) {
+          var ext = blob.type.split("/")[1] || "png";
+          var file = new File([blob], "paste." + ext, { type: blob.type });
+          uploadFile(file, "file");
+        }
+        return;
+      }
+    }
+  });
+
   sendBtn.addEventListener("click", sendMessage);
 
   newChatBtn.addEventListener("click", function() {
@@ -1012,6 +1374,7 @@ document.addEventListener("DOMContentLoaded", function() {
       ws.send(JSON.stringify({ type: "command", command: "new_chat" }));
       ws.send(JSON.stringify({ type: "hello", chat_id: chatId }));
     }
+    closeSidebar();
   });
 
   // --- Chat history persistence ---
@@ -1043,10 +1406,13 @@ document.addEventListener("DOMContentLoaded", function() {
   }
 
   // --- Mobile keyboard viewport fix ---
+  var appEl = document.getElementById("app");
+
   function adjustViewport() {
     if (window.visualViewport) {
-      var h = window.visualViewport.height;
-      document.getElementById("app").style.height = h + "px";
+      var vv = window.visualViewport;
+      appEl.style.height = vv.height + "px";
+      appEl.style.top = vv.offsetTop + "px";
       scrollBottom();
     }
   }
@@ -1054,6 +1420,7 @@ document.addEventListener("DOMContentLoaded", function() {
   if (window.visualViewport) {
     window.visualViewport.addEventListener("resize", adjustViewport);
     window.visualViewport.addEventListener("scroll", adjustViewport);
+    adjustViewport();
   }
 
   // --- Init ---

@@ -79,6 +79,7 @@ class WebChannel(BaseChannel):
         self._app.router.add_get("/", self._handle_index)
         self._app.router.add_get("/ws", self._handle_websocket)
         self._app.router.add_post("/upload", self._handle_upload)
+        self._app.router.add_static("/static", STATIC_DIR, show_index=False)
 
         self._runner = web.AppRunner(self._app)
         await self._runner.setup()
@@ -129,6 +130,24 @@ class WebChannel(BaseChannel):
         # Typing indicator
         if msg.metadata.get("chat_action") == "typing":
             await self._ws_send(ws, {"type": "typing", "active": True})
+            return
+
+        # Session list → send to sidebar
+        session_list = msg.metadata.get("session_list")
+        if session_list is not None:
+            await self._ws_send(ws, {"type": "session_list", "sessions": session_list})
+            return
+
+        # Session resumed → notify client to switch
+        session_resumed = msg.metadata.get("session_resumed")
+        if session_resumed:
+            await self._ws_send(ws, {"type": "session_resumed", **session_resumed})
+            return
+
+        # Session deleted → notify client
+        session_deleted = msg.metadata.get("session_deleted")
+        if session_deleted:
+            await self._ws_send(ws, {"type": "session_deleted", **session_deleted})
             return
 
         # Context data → send as context_info WS message
@@ -378,6 +397,32 @@ class WebChannel(BaseChannel):
                                 "command": "set_context_mode",
                                 "context_mode": mode,
                             },
+                        )
+
+                    elif command == "list_sessions":
+                        await self._handle_message(
+                            sender_id=chat_id,
+                            chat_id=chat_id,
+                            content="",
+                            metadata={"command": "list_sessions"},
+                        )
+
+                    elif command == "resume_session":
+                        session_id = data.get("session_id", "")
+                        await self._handle_message(
+                            sender_id=chat_id,
+                            chat_id=chat_id,
+                            content="",
+                            metadata={"command": "resume_session", "session_id": session_id},
+                        )
+
+                    elif command == "delete_session":
+                        session_id = data.get("session_id", "")
+                        await self._handle_message(
+                            sender_id=chat_id,
+                            chat_id=chat_id,
+                            content="",
+                            metadata={"command": "delete_session", "session_id": session_id},
                         )
 
             elif raw.type.name == "ERROR":
