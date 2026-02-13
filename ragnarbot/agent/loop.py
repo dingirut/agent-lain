@@ -1465,14 +1465,25 @@ class AgentLoop:
         return result, channel, chat_id
 
     def _trim_heartbeat_session(self, session, max_tokens: int = 20_000) -> None:
-        """Trim heartbeat session to stay under max_tokens."""
+        """Trim heartbeat session to stay under max_tokens.
+
+        Flushes tool results first so the token count reflects what will
+        actually be sent to the API on the next heartbeat run.
+        """
         from ragnarbot.agent.tokens import estimate_messages_tokens
 
         provider = self.cache_manager.get_provider_from_model(self.model)
         history = session.get_history()
 
+        # Flush tool results before counting — these will be flushed by
+        # the safety check on the next run anyway, so counting them at
+        # full size would cause us to discard useful messages prematurely.
+        CacheManager._flush_tool_results(history, "hard")
+
         total = estimate_messages_tokens(history, provider)
         if total <= max_tokens:
+            # Still save — flush may have shrunk tool results
+            self._rebuild_session(session, history)
             return
 
         # Remove oldest messages, keeping tool-call groups intact
@@ -1494,7 +1505,10 @@ class AgentLoop:
 
             total = estimate_messages_tokens(history, provider)
 
-        # Rebuild session messages from trimmed history
+        self._rebuild_session(session, history)
+
+    def _rebuild_session(self, session, history: list[dict]) -> None:
+        """Rebuild and save session messages from a processed history list."""
         session.messages = []
         for m in history:
             extras: dict[str, Any] = {}
