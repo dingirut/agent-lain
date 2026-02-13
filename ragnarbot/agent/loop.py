@@ -1394,15 +1394,18 @@ class AgentLoop:
         for _ in range(max_iterations):
             tools_defs = tools.get_definitions()
 
-            # Safety flush: if tool results grew the context beyond API limit,
-            # trim them before sending (same pattern as _process_batch).
+            # Safety flush: only if context exceeds 80% of max (unlikely
+            # in a single run, but guards against extreme cases). During
+            # normal execution, full tool results are preserved — the real
+            # trimming happens after the run in _trim_heartbeat_session.
+            safety_limit = int(self.max_context_tokens * 0.8)
             actual_tokens = self.cache_manager.estimate_context_tokens(
                 messages, self.model, tools=tools_defs,
             )
-            if actual_tokens > self.max_context_tokens:
+            if actual_tokens > safety_limit:
                 logger.warning(
                     f"Heartbeat safety flush: {actual_tokens} tokens "
-                    f"exceed {self.max_context_tokens} limit"
+                    f"exceed {safety_limit} safety limit"
                 )
                 CacheManager._flush_tool_results(messages, "hard")
 
