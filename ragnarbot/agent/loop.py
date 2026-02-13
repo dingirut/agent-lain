@@ -23,6 +23,8 @@ from ragnarbot.agent.tools.config_tool import ConfigTool
 from ragnarbot.agent.tools.cron import CronTool
 from ragnarbot.agent.tools.deliver_result import DeliverResultTool
 from ragnarbot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
+from ragnarbot.agent.tools.heartbeat import HeartbeatTool, parse_blocks
+from ragnarbot.agent.tools.heartbeat_done import HeartbeatDoneTool
 from ragnarbot.agent.tools.media import DownloadFileTool
 from ragnarbot.agent.tools.message import MessageTool
 from ragnarbot.agent.tools.registry import ToolRegistry
@@ -73,6 +75,7 @@ class AgentLoop:
         debounce_seconds: float = 0.5,
         max_context_tokens: int = 200_000,
         context_mode: str = "normal",
+        heartbeat_interval_m: int = 30,
     ):
         from ragnarbot.config.schema import ExecToolConfig
         from ragnarbot.cron.service import CronService
@@ -97,7 +100,7 @@ class AgentLoop:
             model=self.model,
         )
 
-        self.context = ContextBuilder(workspace)
+        self.context = ContextBuilder(workspace, heartbeat_interval_m=heartbeat_interval_m)
         self.sessions = SessionManager(workspace)
         self.tools = ToolRegistry()
         self.subagents = SubagentManager(
@@ -118,6 +121,7 @@ class AgentLoop:
         self._restart_requested = False
         self._stop_events: dict[str, asyncio.Event] = {}
         self._processing_session_key: str | None = None
+        self.last_active_chat: tuple[str, str] | None = None
         self._register_default_tools()
     
     def _register_default_tools(self) -> None:
@@ -157,6 +161,9 @@ class AgentLoop:
         # Cron tool (for scheduling)
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
+
+        # Heartbeat tool (for managing periodic tasks)
+        self.tools.register(HeartbeatTool(workspace=self.workspace))
 
         # Background execution tools
         self.tools.register(ExecBgTool(manager=self.bg_processes))
@@ -421,6 +428,9 @@ class AgentLoop:
 
         msg = batch[0]
 
+        if msg.channel != "cli":
+            self.last_active_chat = (msg.channel, msg.chat_id)
+
         logger.info(
             f"Processing batch of {len(batch)} message(s) from {msg.channel}:{msg.sender_id}"
         )
@@ -525,6 +535,11 @@ class AgentLoop:
                     current_meta[k] = m.metadata[k]
             prefix = _build_message_prefix(current_meta, include_timestamp=is_first)
             prefixed_content = prefix + m.content if prefix else m.content
+
+            # Append ephemeral system note (visible to LLM only, not saved to session)
+            system_note = m.metadata.get("system_note")
+            if system_note:
+                prefixed_content += f"\n\n{system_note}"
 
             batch_data.append({
                 "prefixed_content": prefixed_content,
@@ -1318,6 +1333,202 @@ class AgentLoop:
 
         # Exhausted iterations — return whatever deliver_tool captured
         return deliver_tool.result
+
+    def _build_heartbeat_tool_registry(
+        self,
+        channel: str,
+        chat_id: str,
+    ) -> tuple[ToolRegistry, DeliverResultTool, HeartbeatDoneTool]:
+        """Build a tool registry for heartbeat execution.
+
+        Extends the isolated registry with HeartbeatTool and HeartbeatDoneTool.
+        """
+        reg, deliver_tool = self._build_isolated_tool_registry(channel, chat_id)
+
+        done_tool = HeartbeatDoneTool()
+        reg.register(done_tool)
+
+        heartbeat_tool = HeartbeatTool(workspace=self.workspace)
+        reg.register(heartbeat_tool)
+
+        return reg, deliver_tool, done_tool
+
+    async def process_heartbeat(self) -> tuple[str | None, str | None, str | None]:
+        """Run a heartbeat check — isolated context with rolling session.
+
+        Returns (result, channel, chat_id):
+            - result: content from deliver_result, or None if heartbeat_done
+            - channel, chat_id: last active chat for delivery (None if no active chat)
+        """
+        channel, chat_id = self.last_active_chat or (None, None)
+        tools, deliver_tool, done_tool = self._build_heartbeat_tool_registry(
+            channel or "cli", chat_id or "direct",
+        )
+
+        # Load rolling session
+        session = self.sessions.get_or_create("heartbeat:isolated")
+
+        # Build tasks summary from HEARTBEAT.md
+        hb_path = self.workspace / "HEARTBEAT.md"
+        tasks_summary = "No tasks."
+        if hb_path.exists():
+            content = hb_path.read_text(encoding="utf-8")
+            blocks = parse_blocks(content)
+            if blocks:
+                lines = [f"- [{b['id']}] {b['message'][:50]}" for b in blocks]
+                tasks_summary = "\n".join(lines)
+
+        session_metadata = {
+            "heartbeat_isolated": {
+                "tasks_summary": tasks_summary,
+            },
+        }
+
+        messages = self.context.build_messages(
+            history=session.get_history(),
+            current_message="Execute heartbeat check.",
+            channel=channel,
+            chat_id=chat_id,
+            session_metadata=session_metadata,
+        )
+
+        # Track where new messages start (for session persistence)
+        new_start = len(messages) - 1  # the user message we just added
+
+        max_iterations = 20
+        result = None
+        for _ in range(max_iterations):
+            tools_defs = tools.get_definitions()
+
+            # Safety flush: only if context exceeds 80% of max (unlikely
+            # in a single run, but guards against extreme cases). During
+            # normal execution, full tool results are preserved — the real
+            # trimming happens after the run in _trim_heartbeat_session.
+            safety_limit = int(self.max_context_tokens * 0.8)
+            actual_tokens = self.cache_manager.estimate_context_tokens(
+                messages, self.model, tools=tools_defs,
+            )
+            if actual_tokens > safety_limit:
+                logger.warning(
+                    f"Heartbeat safety flush: {actual_tokens} tokens "
+                    f"exceed {safety_limit} safety limit"
+                )
+                CacheManager._flush_tool_results(messages, "hard")
+
+            api_messages = [
+                {k: v for k, v in m.items() if k != "_ts"} for m in messages
+            ]
+            response = await self.provider.chat(
+                messages=api_messages, tools=tools_defs, model=self.model,
+            )
+
+            if response.has_tool_calls:
+                tool_call_dicts = [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.name,
+                            "arguments": json.dumps(tc.arguments),
+                        },
+                    }
+                    for tc in response.tool_calls
+                ]
+                messages = self.context.add_assistant_message(
+                    messages, response.content, tool_call_dicts,
+                )
+
+                for tc in response.tool_calls:
+                    tc_result = await tools.execute(tc.name, tc.arguments)
+                    messages = self.context.add_tool_result(
+                        messages, tc.id, tc.name, tc_result,
+                    )
+
+                if deliver_tool.result is not None:
+                    result = deliver_tool.result
+                    break
+                if done_tool.done:
+                    result = None
+                    break
+            else:
+                # Text response — treat as done with no result
+                messages.append({"role": "assistant", "content": response.content or ""})
+                result = None
+                break
+
+        # Save new messages to rolling session
+        for m in messages[new_start:]:
+            extras: dict[str, Any] = {}
+            if "tool_calls" in m:
+                extras["tool_calls"] = m["tool_calls"]
+            if "tool_call_id" in m:
+                extras["tool_call_id"] = m["tool_call_id"]
+            if "name" in m:
+                extras["name"] = m["name"]
+            session.add_message(m["role"], m.get("content"), **extras)
+        self.sessions.save(session)
+
+        # Trim rolling session to stay within budget
+        self._trim_heartbeat_session(session)
+
+        return result, channel, chat_id
+
+    def _trim_heartbeat_session(self, session, max_tokens: int = 20_000) -> None:
+        """Trim heartbeat session to stay under max_tokens.
+
+        Flushes tool results first so the token count reflects what will
+        actually be sent to the API on the next heartbeat run.
+        """
+        from ragnarbot.agent.tokens import estimate_messages_tokens
+
+        provider = self.cache_manager.get_provider_from_model(self.model)
+        history = session.get_history()
+
+        # Flush tool results before counting — these will be flushed by
+        # the safety check on the next run anyway, so counting them at
+        # full size would cause us to discard useful messages prematurely.
+        CacheManager._flush_tool_results(history, "hard")
+
+        total = estimate_messages_tokens(history, provider)
+        if total <= max_tokens:
+            # Still save — flush may have shrunk tool results
+            self._rebuild_session(session, history)
+            return
+
+        # Remove oldest messages, keeping tool-call groups intact
+        while total > max_tokens and history:
+            msg = history[0]
+            # If this is a tool result, also remove the preceding assistant
+            # message with matching tool_calls (already removed or not present
+            # at index 0). Just remove the oldest message.
+            history.pop(0)
+
+            # If we removed an assistant message with tool_calls, also remove
+            # all its subsequent tool results
+            if msg.get("tool_calls"):
+                tool_call_ids = {
+                    tc.get("id") for tc in msg.get("tool_calls", [])
+                }
+                while history and history[0].get("tool_call_id") in tool_call_ids:
+                    history.pop(0)
+
+            total = estimate_messages_tokens(history, provider)
+
+        self._rebuild_session(session, history)
+
+    def _rebuild_session(self, session, history: list[dict]) -> None:
+        """Rebuild and save session messages from a processed history list."""
+        session.messages = []
+        for m in history:
+            extras: dict[str, Any] = {}
+            if "tool_calls" in m:
+                extras["tool_calls"] = m["tool_calls"]
+            if "tool_call_id" in m:
+                extras["tool_call_id"] = m["tool_call_id"]
+            if "name" in m:
+                extras["name"] = m["name"]
+            session.add_message(m["role"], m.get("content"), **extras)
+        self.sessions.save(session)
 
     def get_context_tokens(
         self,

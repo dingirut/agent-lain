@@ -245,6 +245,7 @@ def gateway_main(
         debounce_seconds=config.agents.defaults.debounce_seconds,
         max_context_tokens=config.agents.defaults.max_context_tokens,
         context_mode=config.agents.defaults.context_mode,
+        heartbeat_interval_m=config.heartbeat.interval_m,
     )
 
     # Set cron callback (needs agent)
@@ -333,15 +334,47 @@ def gateway_main(
     cron.on_job = on_cron_job
 
     # Create heartbeat service
-    async def on_heartbeat(prompt: str) -> str:
-        """Execute heartbeat through the agent."""
-        return await agent.process_direct(prompt, session_key="heartbeat")
+    import time as _time
+    from ragnarbot.bus.events import InboundMessage as _InboundMessage
+
+    async def on_heartbeat() -> tuple[str | None, str | None, str | None]:
+        return await agent.process_heartbeat()
+
+    async def on_heartbeat_deliver(result: str, channel: str, chat_id: str):
+        """Phase 2: inject heartbeat result into user's active chat."""
+        await bus.publish_inbound(_InboundMessage(
+            channel=channel,
+            sender_id="heartbeat",
+            chat_id=chat_id,
+            content=f"[Heartbeat report]\n---\n{result}",
+            metadata={
+                "heartbeat_result": True,
+                "system_note": (
+                    "[System] This is an internal message — the user does not see it. "
+                    "Relay the results to the user naturally, in the tone and context "
+                    "of your conversation. Do not mention the heartbeat mechanism."
+                ),
+            },
+        ))
+
+    async def on_heartbeat_complete(channel: str | None, chat_id: str | None):
+        """Save silent marker to user's session."""
+        if not channel or not chat_id:
+            return
+        session_key = f"{channel}:{chat_id}"
+        session = agent.sessions.get_or_create(session_key)
+        ts = _time.strftime("%Y-%m-%d %H:%M:%S")
+        marker = f"[Heartbeat check | {ts} | silent]"
+        session.add_message("assistant", marker)
+        agent.sessions.save(session)
 
     heartbeat = HeartbeatService(
         workspace=config.workspace_path,
         on_heartbeat=on_heartbeat,
-        interval_s=30 * 60,  # 30 minutes
-        enabled=True
+        on_deliver=on_heartbeat_deliver,
+        on_complete=on_heartbeat_complete,
+        interval_m=config.heartbeat.interval_m,
+        enabled=config.heartbeat.enabled,
     )
 
     # Create channel manager
@@ -356,7 +389,8 @@ def gateway_main(
     if cron_status["jobs"] > 0:
         console.print(f"[green]✓[/green] Cron: {cron_status['jobs']} scheduled jobs")
 
-    console.print("[green]✓[/green] Heartbeat: every 30m")
+    hb_status = f"every {config.heartbeat.interval_m}m" if config.heartbeat.enabled else "disabled"
+    console.print(f"[green]✓[/green] Heartbeat: {hb_status}")
 
     pid_path = Path.home() / ".ragnarbot" / "gateway.pid"
 

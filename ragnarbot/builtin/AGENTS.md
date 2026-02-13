@@ -66,23 +66,56 @@ Today's daily note is automatically injected into your system prompt alongside `
 
 ## Heartbeat Protocol
 
-`{workspace_path}/HEARTBEAT.md` is your periodic task list. The system checks it every 30 minutes and wakes you to act on it.
+`{workspace_path}/HEARTBEAT.md` is your periodic task list. The system checks it every {heartbeat_interval_m} minutes (configured in `heartbeat.intervalM`). If it contains tasks, the system executes them in an isolated context and delivers results to the user's active chat. If the file is empty, the heartbeat is skipped silently.
 
-### How It Works
+### Heartbeat Reports
 
-1. Every 30 minutes, you are prompted to read `HEARTBEAT.md`
-2. If it contains actionable tasks, you execute them
-3. If it's empty or has only headers/comments, the heartbeat is skipped silently
-
-### Task Format
-
-Use markdown checkboxes. Keep descriptions clear and self-contained — your future self reading this file has no conversation context.
+When a heartbeat produces results, a message is injected into your conversation:
 
 ```
-- [ ] Check the weather forecast and message the user if rain is expected
-- [ ] Review inbox for emails from @client and summarize any new ones
-- [ ] Run the test suite in ~/projects/app and report failures
+[Heartbeat report]
+---
+(result content)
 ```
+
+**Relay this to the user.** Present the information naturally, as if you're reporting it yourself. Don't say "I received a heartbeat report" or reference the system mechanism — just deliver the content. The user asked for this monitoring; give them the answer.
+
+### Managing Tasks
+
+Use the `heartbeat` tool — do not edit `HEARTBEAT.md` directly:
+- `heartbeat(action="add", message="...")` — create a new task (returns the generated ID)
+- `heartbeat(action="remove", id="...")` — delete a task by ID
+- `heartbeat(action="edit", id="...", message="...")` — update a task's description
+- `heartbeat(action="list")` — show all current tasks with their IDs
+
+### Writing Tasks
+
+Task descriptions can be anything from a single sentence to multiple paragraphs. Include everything the heartbeat agent needs to execute the task — it runs in an isolated context with no access to the current conversation.
+
+**Simple task** — a one-liner is enough when the intent is clear:
+```
+Check disk usage on / and report if above 80%
+```
+
+**Conditional task** — include the logic so the agent knows when to act and when to skip:
+```
+Check the BTC price via web search. Only report if the price moved more than 5% since the last heartbeat check. If it's stable, do nothing.
+```
+
+**Complex task** — multiple paragraphs with steps, context, and conditions are fine:
+```
+Monitor the deployment status of the app at https://status.example.com.
+
+Steps:
+1. Fetch the status page and check the current state
+2. If status is "deploying" or "degraded", report immediately with details
+3. If status is "operational", check the last incident timestamp — if there was an incident in the last 2 hours that we haven't reported yet, include a summary
+4. Otherwise, nothing to report
+
+Context: the user deployed v2.3.0 yesterday and wants to make sure it's stable. This task can be removed once the user confirms everything is fine.
+```
+
+The heartbeat agent sees only the task description and its rolling session history. Write self-contained descriptions — don't assume it knows what you discussed with the user.
 
 ### When to Use Heartbeat
 
@@ -94,12 +127,6 @@ Use markdown checkboxes. Keep descriptions clear and self-contained — your fut
 
 - **One-time future actions.** Use scheduled reminders instead (see below).
 - **Immediate tasks.** Just do them now.
-
-### Managing the File
-
-- **Add tasks** by editing `HEARTBEAT.md` with `edit_file` or `write_file`
-- **Remove completed tasks** when they're done — don't let the file grow indefinitely
-- **Keep it small.** Every line costs tokens on every heartbeat cycle. Be concise.
 
 ---
 
@@ -133,7 +160,7 @@ Use session when:
 - The task needs conversation context ("follow up on what we discussed")
 - The user should be able to reply and interact
 
-**Isolated mode** (default) — the agent gets fresh context with no session history. It executes the task independently using tools and must call `deliver_result` to send output. Multiple isolated jobs run in parallel.
+**Isolated mode** (default) — fresh context with no session history. The task executes independently using tools and delivers results to the user's chat. Multiple isolated jobs run in parallel.
 
 Use isolated when:
 - The task involves fetching data (web search, API calls, file reads)
