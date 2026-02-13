@@ -25,25 +25,60 @@ BOT_COMMANDS = [
 ]
 
 
-async def set_bot_commands(bot) -> None:
-    """Set the bot command menu.
+async def set_bot_commands(bot, chat_ids: list[int] | None = None) -> None:
+    """Ensure bot command menu is up to date across all relevant scopes.
 
-    Clears higher-priority scopes (all_private_chats, all_group_chats)
-    so the default scope is always authoritative, then (re)sets commands.
+    Checks the default scope against BOT_COMMANDS and updates only if stale.
+    Clears higher-priority scopes (all_private_chats, all_group_chats) and
+    per-chat overrides for known users so the default scope is authoritative.
     """
-    from loguru import logger as _log
-    from telegram import BotCommand, BotCommandScopeAllGroupChats, BotCommandScopeAllPrivateChats
+    from telegram import (
+        BotCommand, BotCommandScopeAllGroupChats,
+        BotCommandScopeAllPrivateChats, BotCommandScopeChat,
+    )
 
-    # Clear scopes that override default — only default should define commands
+    target = [BotCommand(cmd, desc) for cmd, desc in BOT_COMMANDS]
+
+    def _matches(current: list) -> bool:
+        return (
+            len(current) == len(target)
+            and all(
+                a.command == b.command and a.description == b.description
+                for a, b in zip(current, target)
+            )
+        )
+
+    updated = False
+
+    # 1. Ensure default scope has current commands
+    if not _matches(await bot.get_my_commands()):
+        await bot.set_my_commands(target)
+        updated = True
+
+    # 2. Clear higher-priority scopes that would override default
     for scope in (BotCommandScopeAllPrivateChats(), BotCommandScopeAllGroupChats()):
         try:
-            await bot.delete_my_commands(scope=scope)
+            if await bot.get_my_commands(scope=scope):
+                await bot.delete_my_commands(scope=scope)
+                updated = True
         except Exception:
             pass
 
-    commands = [BotCommand(cmd, desc) for cmd, desc in BOT_COMMANDS]
-    await bot.set_my_commands(commands)
-    _log.info(f"Bot commands set: {[c.command for c in commands]}")
+    # 3. Clear stale per-chat overrides for known users
+    for cid in (chat_ids or []):
+        try:
+            per_chat = await bot.get_my_commands(scope=BotCommandScopeChat(chat_id=cid))
+            if per_chat and not _matches(per_chat):
+                await bot.delete_my_commands(scope=BotCommandScopeChat(chat_id=cid))
+                updated = True
+                logger.info(f"Cleared stale command override for chat {cid}")
+        except Exception:
+            pass
+
+    if updated:
+        logger.info(f"Bot commands updated: {[c[0] for c in BOT_COMMANDS]}")
+    else:
+        logger.debug("Bot commands already up to date")
 
 
 def _markdown_to_telegram_html(text: str) -> str:
@@ -297,7 +332,14 @@ class TelegramChannel(BaseChannel):
         bot_info = await self._app.bot.get_me()
         logger.info(f"Telegram bot @{bot_info.username} connected")
 
-        await set_bot_commands(self._app.bot)
+        # Pass known chat IDs (from allow_from) to clear per-chat command overrides
+        chat_ids = []
+        for uid in (self.config.allow_from or []):
+            try:
+                chat_ids.append(int(uid))
+            except (ValueError, TypeError):
+                pass
+        await set_bot_commands(self._app.bot, chat_ids=chat_ids or None)
         
         # Register media download callback
         if self.media_manager:

@@ -706,6 +706,8 @@ class AgentLoop:
 
         if not stopped:
             messages.append({"role": "assistant", "content": final_content or ""})
+        else:
+            messages.append({"role": "user", "content": "[Stopped by user]"})
 
         # -- Save new messages to session --
         # User messages come first (one per batch item), then assistant/tool messages.
