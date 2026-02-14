@@ -141,15 +141,10 @@ class WebChannel(BaseChannel):
 
         # ── Global broadcast (all devices) ───────────────────────
 
-        # Stop typing (e.g. after processing cancelled)
-        if msg.metadata.get("chat_action") == "typing_stop":
+        # Stop typing — cooperative stop or explicit typing_stop
+        if msg.metadata.get("stop_typing") or msg.metadata.get("chat_action") == "typing_stop":
             await self._broadcast({"type": "typing", "active": False})
-            return
-
-        # Processing stopped
-        if msg.metadata.get("stopped"):
             await self._broadcast({"type": "stopped"})
-            await self._broadcast({"type": "typing", "active": False})
             return
 
         # ── Session-aware broadcast (devices on same session) ────

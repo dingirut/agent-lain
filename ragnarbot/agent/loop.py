@@ -7,25 +7,42 @@ from typing import Any
 
 from loguru import logger
 
-from ragnarbot.bus.events import InboundMessage, OutboundMessage
-from ragnarbot.bus.queue import MessageBus
-from ragnarbot.providers.base import LLMProvider
+from ragnarbot.agent.background import BackgroundProcessManager
 from ragnarbot.agent.cache import CacheManager
 from ragnarbot.agent.compactor import Compactor
 from ragnarbot.agent.context import ContextBuilder
-from ragnarbot.agent.tools.registry import ToolRegistry
-from ragnarbot.agent.tools.filesystem import ReadFileTool, WriteFileTool, EditFileTool, ListDirTool
-from ragnarbot.agent.tools.shell import ExecTool
-from ragnarbot.agent.tools.web import WebSearchTool, WebFetchTool
+from ragnarbot.agent.subagent import SubagentManager
+from ragnarbot.agent.tools.background import (
+    DismissTool,
+    ExecBgTool,
+    KillTool,
+    OutputTool,
+    PollTool,
+)
+from ragnarbot.agent.tools.config_tool import ConfigTool
+from ragnarbot.agent.tools.cron import CronTool
+from ragnarbot.agent.tools.deliver_result import DeliverResultTool
+from ragnarbot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
+from ragnarbot.agent.tools.heartbeat import HeartbeatTool, parse_blocks
+from ragnarbot.agent.tools.heartbeat_done import HeartbeatDoneTool
 from ragnarbot.agent.tools.media import DownloadFileTool
 from ragnarbot.agent.tools.message import MessageTool
-from ragnarbot.agent.tools.telegram import (
-    SendPhotoTool, SendVideoTool, SendFileTool, SetReactionTool,
-)
+from ragnarbot.agent.tools.registry import ToolRegistry
+from ragnarbot.agent.tools.restart import RestartTool
+from ragnarbot.agent.tools.shell import ExecTool
 from ragnarbot.agent.tools.spawn import SpawnTool
-from ragnarbot.agent.tools.cron import CronTool
-from ragnarbot.agent.subagent import SubagentManager
+from ragnarbot.agent.tools.telegram import (
+    SendFileTool,
+    SendPhotoTool,
+    SendVideoTool,
+    SetReactionTool,
+)
+from ragnarbot.agent.tools.update import UpdateTool
+from ragnarbot.agent.tools.web import WebFetchTool, WebSearchTool
+from ragnarbot.bus.events import InboundMessage, OutboundMessage
+from ragnarbot.bus.queue import MessageBus
 from ragnarbot.media.manager import MediaManager
+from ragnarbot.providers.base import LLMProvider
 from ragnarbot.session.manager import SessionManager
 
 
@@ -41,6 +58,7 @@ class AgentLoop:
     5. Sends responses back
     """
 
+    COMPACT_MIN_MESSAGES = 60
     READ_ONLY_COMMANDS = frozenset({"context_info", "context_mode", "list_sessions", "resume_session", "stop"})
 
     def __init__(
@@ -50,6 +68,7 @@ class AgentLoop:
         workspace: Path,
         model: str | None = None,
         brave_api_key: str | None = None,
+        search_engine: str = "brave",
         exec_config: "ExecToolConfig | None" = None,
         cron_service: "CronService | None" = None,
         stream_steps: bool = False,
@@ -57,6 +76,7 @@ class AgentLoop:
         debounce_seconds: float = 0.5,
         max_context_tokens: int = 200_000,
         context_mode: str = "normal",
+        heartbeat_interval_m: int = 30,
     ):
         from ragnarbot.config.schema import ExecToolConfig
         from ragnarbot.cron.service import CronService
@@ -65,6 +85,7 @@ class AgentLoop:
         self.workspace = workspace
         self.model = model or provider.get_default_model()
         self.brave_api_key = brave_api_key
+        self.search_engine = search_engine
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
         self.stream_steps = stream_steps
@@ -80,7 +101,7 @@ class AgentLoop:
             model=self.model,
         )
 
-        self.context = ContextBuilder(workspace)
+        self.context = ContextBuilder(workspace, heartbeat_interval_m=heartbeat_interval_m)
         self.sessions = SessionManager(workspace)
         self.tools = ToolRegistry()
         self.subagents = SubagentManager(
@@ -89,10 +110,19 @@ class AgentLoop:
             bus=bus,
             model=self.model,
             brave_api_key=brave_api_key,
+            search_engine=search_engine,
             exec_config=self.exec_config,
         )
 
+        self.bg_processes = BackgroundProcessManager(
+            bus=bus, workspace=workspace, exec_config=self.exec_config,
+        )
+
         self._running = False
+        self._restart_requested = False
+        self._stop_events: dict[str, asyncio.Event] = {}
+        self._processing_session_key: str | None = None
+        self.last_active_chat: tuple[str, str] | None = None
         self._register_default_tools()
     
     def _register_default_tools(self) -> None:
@@ -111,7 +141,7 @@ class AgentLoop:
         ))
         
         # Web tools
-        self.tools.register(WebSearchTool(api_key=self.brave_api_key))
+        self.tools.register(WebSearchTool(engine=self.search_engine, api_key=self.brave_api_key))
         self.tools.register(WebFetchTool())
         
         # Message tool
@@ -133,10 +163,25 @@ class AgentLoop:
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
 
+        # Heartbeat tool (for managing periodic tasks)
+        self.tools.register(HeartbeatTool(workspace=self.workspace))
+
+        # Background execution tools
+        self.tools.register(ExecBgTool(manager=self.bg_processes))
+        self.tools.register(PollTool(manager=self.bg_processes))
+        self.tools.register(OutputTool(manager=self.bg_processes))
+        self.tools.register(KillTool(manager=self.bg_processes))
+        self.tools.register(DismissTool(manager=self.bg_processes))
+
         # Download file tool (for lazy file downloads)
         if self.media_manager:
             self.tools.register(DownloadFileTool(self.media_manager))
-    
+
+        # Config and restart tools
+        self.tools.register(ConfigTool(agent=self))
+        self.tools.register(RestartTool(agent=self))
+        self.tools.register(UpdateTool(agent=self))
+
     async def run(self) -> None:
         """Run the agent loop, processing messages from the bus."""
         self._running = True
@@ -158,7 +203,9 @@ class AgentLoop:
             if command in self.READ_ONLY_COMMANDS:
                 response = self._handle_command(command, msg)
                 if response:
-                    if self._processing_task and not self._processing_task.done():
+                    if (command != "stop"
+                            and self._processing_task
+                            and not self._processing_task.done()):
                         response.metadata["keep_typing"] = True
                     await self.bus.publish_outbound(response)
                 continue
@@ -173,11 +220,16 @@ class AgentLoop:
                 )
                 continue
 
-            # Mutating commands (new_chat, set_context_mode)
+            # Mutating commands (new_chat, set_context_mode, compact)
             if command:
-                response = self._handle_command(command, msg)
-                if response:
-                    await self.bus.publish_outbound(response)
+                if command == "compact":
+                    self._processing_task = asyncio.create_task(
+                        self._handle_compact_async(msg),
+                    )
+                else:
+                    response = self._handle_command(command, msg)
+                    if response:
+                        await self.bus.publish_outbound(response)
                 continue
 
             # Regular messages: debounce, then process in background
@@ -191,6 +243,66 @@ class AgentLoop:
         self._running = False
         logger.info("Agent loop stopping")
 
+    @property
+    def restart_requested(self) -> bool:
+        """Whether a restart has been requested."""
+        return self._restart_requested
+
+    def request_restart(self) -> None:
+        """Schedule a graceful restart after the current response completes."""
+        self._restart_requested = True
+        logger.info("Restart requested — will restart after current processing completes")
+
+    def _is_stopped(self, session_key: str) -> bool:
+        event = self._stop_events.get(session_key)
+        return event is not None and event.is_set()
+
+    def _request_stop(self, session_key: str) -> bool:
+        """Returns True if there was something to stop."""
+        if (self._processing_task and not self._processing_task.done()
+                and self._processing_session_key == session_key):
+            event = self._stop_events.get(session_key)
+            if event:
+                event.set()
+                return True
+        return False
+
+    def _clear_stop(self, session_key: str):
+        """Reset stop state with a fresh (unset) event for this session."""
+        self._stop_events[session_key] = asyncio.Event()
+
+    async def _chat_or_stop(self, session_key: str, **chat_kwargs):
+        """Race provider.chat() against the stop event.
+
+        Returns the LLM response, or None if stopped mid-call.
+        """
+        event = self._stop_events.get(session_key)
+        chat_task = asyncio.create_task(self.provider.chat(**chat_kwargs))
+
+        if not event:
+            return await chat_task
+
+        stop_task = asyncio.create_task(event.wait())
+        done, pending = await asyncio.wait(
+            [chat_task, stop_task], return_when=asyncio.FIRST_COMPLETED,
+        )
+        for t in pending:
+            t.cancel()
+            try:
+                await t
+            except (asyncio.CancelledError, Exception):
+                pass
+
+        if stop_task in done:
+            # Consume result to avoid unhandled-exception warnings
+            if chat_task in done:
+                try:
+                    chat_task.result()
+                except Exception:
+                    pass
+            return None
+        return chat_task.result()
+
     def _reap_processing_task(self):
         """Check for completed/failed background task."""
         if self._processing_task and self._processing_task.done():
@@ -199,6 +311,8 @@ class AgentLoop:
             except Exception as e:
                 logger.error(f"Processing task error: {e}")
             self._processing_task = None
+            if self._restart_requested:
+                self._running = False
 
     async def _await_processing_task(self):
         """Wait for any active processing to complete."""
@@ -214,37 +328,53 @@ class AgentLoop:
         """Run processing and publish response (background task wrapper)."""
         if system:
             msg = batch_or_msg
-            try:
-                response = await self._process_system_message(msg)
-                if response:
-                    await self.bus.publish_outbound(response)
-            except Exception as e:
-                logger.error(f"Error processing system message: {e}")
+            parts = msg.chat_id.split(":", 1) if ":" in msg.chat_id else ("cli", msg.chat_id)
+            session_key = f"{parts[0]}:{parts[1]}"
         else:
             batch = batch_or_msg
             msg = batch[0]
-            try:
-                response = await self._process_batch(batch)
-                if response:
-                    await self.bus.publish_outbound(response)
-            except asyncio.CancelledError:
-                logger.info("Processing cancelled by user")
+            session_key = f"{msg.channel}:{msg.chat_id}"
+
+        self._processing_session_key = session_key
+        self._clear_stop(session_key)
+
+        try:
+            if system:
                 try:
+                    response = await self._process_system_message(msg)
+                    if response:
+                        await self.bus.publish_outbound(response)
+                    else:
+                        await self.bus.publish_outbound(OutboundMessage(
+                            channel=parts[0],
+                            chat_id=parts[1],
+                            content="",
+                            metadata={"stop_typing": True},
+                        ))
+                except Exception as e:
+                    logger.error(f"Error processing system message: {e}")
+            else:
+                try:
+                    response = await self._process_batch(batch)
+                    if response:
+                        await self.bus.publish_outbound(response)
+                    else:
+                        await self.bus.publish_outbound(OutboundMessage(
+                            channel=msg.channel,
+                            chat_id=msg.chat_id,
+                            content="",
+                            metadata={"stop_typing": True},
+                        ))
+                except Exception as e:
+                    logger.error(f"Error processing message: {e}")
                     await self.bus.publish_outbound(OutboundMessage(
                         channel=msg.channel,
                         chat_id=msg.chat_id,
-                        content="",
-                        metadata={"chat_action": "typing_stop"},
+                        content=f"Sorry, I encountered an error: {str(e)}"
                     ))
-                except Exception:
-                    pass
-            except Exception as e:
-                logger.error(f"Error processing message: {e}")
-                await self.bus.publish_outbound(OutboundMessage(
-                    channel=msg.channel,
-                    chat_id=msg.chat_id,
-                    content=f"Sorry, I encountered an error: {str(e)}"
-                ))
+        finally:
+            self._processing_session_key = None
+            self._stop_events.pop(session_key, None)
 
     async def _debounce(self, first: InboundMessage) -> list[InboundMessage]:
         """Collect rapid-fire messages from the same session into a batch.
@@ -318,6 +448,9 @@ class AgentLoop:
 
         msg = batch[0]
 
+        if msg.channel != "cli":
+            self.last_active_chat = (msg.channel, msg.chat_id)
+
         logger.info(
             f"Processing batch of {len(batch)} message(s) from {msg.channel}:{msg.sender_id}"
         )
@@ -363,6 +496,22 @@ class AgentLoop:
         cron_tool = self.tools.get("cron")
         if isinstance(cron_tool, CronTool):
             cron_tool.set_context(msg.channel, msg.chat_id)
+
+        exec_bg_tool = self.tools.get("exec_bg")
+        if isinstance(exec_bg_tool, ExecBgTool):
+            exec_bg_tool.set_context(msg.channel, msg.chat_id)
+
+        poll_tool = self.tools.get("poll")
+        if isinstance(poll_tool, PollTool):
+            poll_tool.set_context(msg.channel, msg.chat_id)
+
+        restart_tool = self.tools.get("restart")
+        if isinstance(restart_tool, RestartTool):
+            restart_tool.set_context(msg.channel, msg.chat_id)
+
+        update_tool = self.tools.get("update")
+        if isinstance(update_tool, UpdateTool):
+            update_tool.set_context(msg.channel, msg.chat_id)
 
         download_tool = self.tools.get("download_file")
         if isinstance(download_tool, DownloadFileTool):
@@ -416,6 +565,11 @@ class AgentLoop:
             prefix = _build_message_prefix(current_meta, include_timestamp=is_first)
             prefixed_content = prefix + m.content if prefix else m.content
 
+            # Append ephemeral system note (visible to LLM only, not saved to session)
+            system_note = m.metadata.get("system_note")
+            if system_note:
+                prefixed_content += f"\n\n{system_note}"
+
             batch_data.append({
                 "prefixed_content": prefixed_content,
                 "media_refs": media_refs,
@@ -450,11 +604,19 @@ class AgentLoop:
         new_start = len(messages) - len(batch)
 
         # Agent loop
+        session_key = f"{msg.channel}:{msg.chat_id}"
         final_content = None
         compacted_this_turn = False
+        stopped = False
 
         try:
             while True:
+
+                # CHECKPOINT 1 — before LLM call
+                if self._is_stopped(session_key):
+                    logger.info(f"Stop requested before LLM call for {session_key}")
+                    stopped = True
+                    break
 
                 # Cache flush escalation (if TTL expired)
                 flushed = False
@@ -509,14 +671,27 @@ class AgentLoop:
                 api_messages = [
                     {k: v for k, v in m.items() if k != "_ts"} for m in messages
                 ]
-                response = await self.provider.chat(
+                response = await self._chat_or_stop(
+                    session_key,
                     messages=api_messages,
                     tools=tools_defs,
-                    model=self.model
+                    model=self.model,
                 )
+
+                # LLM call cancelled by stop
+                if response is None:
+                    logger.info(f"LLM call cancelled by stop for {session_key}")
+                    stopped = True
+                    break
 
                 # Track cache creation/read for flush scheduling
                 self.cache_manager.mark_cache_created(session, response.usage)
+
+                # Stop check after LLM returns (covers final text response)
+                if self._is_stopped(session_key):
+                    logger.info(f"Stop requested after LLM call for {session_key}")
+                    stopped = True
+                    break
 
                 if response.has_tool_calls:
                     if self.stream_steps and response.content:
@@ -542,13 +717,29 @@ class AgentLoop:
                         messages, response.content, tool_call_dicts
                     )
 
-                    for tool_call in response.tool_calls:
+                    for idx, tool_call in enumerate(response.tool_calls):
+                        # Stop check before each individual tool execution
+                        if self._is_stopped(session_key):
+                            logger.info(
+                                f"Stop requested during tool execution for {session_key}"
+                            )
+                            stopped = True
+                            for remaining in response.tool_calls[idx:]:
+                                messages = self.context.add_tool_result(
+                                    messages, remaining.id, remaining.name,
+                                    "[Stopped by user]"
+                                )
+                            break
+
                         args_str = json.dumps(tool_call.arguments)
                         logger.debug(f"Executing tool: {tool_call.name} with arguments: {args_str}")
                         result = await self.tools.execute(tool_call.name, tool_call.arguments)
                         messages = self.context.add_tool_result(
                             messages, tool_call.id, tool_call.name, result
                         )
+
+                    if stopped:
+                        break
                 else:
                     final_content = response.content
                     break
@@ -557,7 +748,10 @@ class AgentLoop:
             # should_flush() sees the correct created_at on the next turn.
             self.sessions.save(session)
 
-        messages.append({"role": "assistant", "content": final_content or ""})
+        if not stopped:
+            messages.append({"role": "assistant", "content": final_content or ""})
+        else:
+            messages.append({"role": "user", "content": "[Stopped by user]"})
 
         # -- Save new messages to session --
         # User messages come first (one per batch item), then assistant/tool messages.
@@ -589,7 +783,7 @@ class AgentLoop:
                 )
         self.sessions.save(session)
 
-        if not final_content:
+        if stopped or not final_content:
             return None
 
         return OutboundMessage(
@@ -603,6 +797,8 @@ class AgentLoop:
         """Dispatch a channel command without calling the LLM."""
         if command == "new_chat":
             return self._handle_new_chat(msg)
+        if command == "stop":
+            return self._handle_stop(msg)
         if command == "context_mode":
             return self._handle_context_mode(msg)
         if command == "set_context_mode":
@@ -638,6 +834,21 @@ class AgentLoop:
             chat_id=msg.chat_id,
             content=f"✨ <b>New chat started</b>\n\n🤖 Model: <code>{self.model}</code>",
             metadata={"raw_html": True, "_session_id": session.key},
+        )
+
+    def _handle_stop(self, msg: InboundMessage) -> OutboundMessage:
+        """Stop the currently running agent response for this session."""
+        session_key = f"{msg.channel}:{msg.chat_id}"
+        if self._request_stop(session_key):
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content="✋ Agent response stopped",
+            )
+        return OutboundMessage(
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            content="Nothing to stop.",
         )
 
     def _handle_context_mode(self, msg: InboundMessage) -> OutboundMessage:
@@ -886,17 +1097,116 @@ class AgentLoop:
 
         return None
 
-    def _handle_stop(self, msg: InboundMessage) -> OutboundMessage | None:
-        """Cancel the active processing task."""
-        if self._processing_task and not self._processing_task.done():
-            self._processing_task.cancel()
-            return OutboundMessage(
+    async def _handle_compact_async(self, msg: InboundMessage) -> None:
+        """Handle /compact command — forced compaction as a blocking task."""
+        session_key = f"{msg.channel}:{msg.chat_id}"
+        session = self.sessions.get_or_create(session_key)
+
+        # Check minimum threshold — count only messages after last compaction
+        last_idx = self.compactor._find_last_compaction_idx(session.messages)
+        after_compaction = len(session.messages) - (last_idx + 1 if last_idx is not None else 0)
+
+        if after_compaction < self.COMPACT_MIN_MESSAGES:
+            await self.bus.publish_outbound(OutboundMessage(
                 channel=msg.channel,
                 chat_id=msg.chat_id,
-                content="",
-                metadata={"stopped": True},
+                content=(
+                    f"📦 Not enough new messages to compact "
+                    f"({after_compaction}/{self.COMPACT_MIN_MESSAGES})"
+                ),
+            ))
+            return
+
+        # Check compactable range (messages between last compaction and tail)
+        compact_start = last_idx if last_idx is not None else 0
+        tail_count = self.compactor._determine_tail(session.messages)
+        compact_end = len(session.messages) - tail_count
+        compactable = compact_end - compact_start
+
+        if compactable <= 0:
+            await self.bus.publish_outbound(OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content="📦 Nothing to compact — all messages are in the tail.",
+            ))
+            return
+
+        # Send "compacting" status message
+        logger.info(
+            f"Manual compaction started for {session_key}: "
+            f"{compactable} messages to compact, {tail_count} in tail"
+        )
+        await self.bus.publish_outbound(OutboundMessage(
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            content=f"📦 Compacting {compactable} messages...",
+            metadata={"keep_typing": True},
+        ))
+
+        # Send typing indicator
+        await self.bus.publish_outbound(OutboundMessage(
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            content="",
+            metadata={"chat_action": "typing"},
+        ))
+
+        # Build messages (system + history, no current message)
+        messages = self.context.build_messages(
+            history=session.get_history(),
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            session_key=session.key,
+            session_metadata=session.metadata,
+        )
+
+        compactions_before = sum(
+            1 for m in session.messages
+            if m.get("metadata", {}).get("type") == "compaction"
+        )
+
+        # Run compaction
+        try:
+            messages, _ = await self.compactor.compact(
+                session=session,
+                context_mode=self.context_mode,
+                context_builder=self.context,
+                messages=messages,
+                new_start=len(messages),
+                tools=self.tools.get_definitions(),
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                session_metadata=session.metadata,
             )
-        return None
+        except Exception as e:
+            logger.error(f"Manual compaction failed for {session_key}: {e}")
+            await self.bus.publish_outbound(OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=f"❌ Compaction failed: {e}",
+            ))
+            return
+
+        compactions_after = sum(
+            1 for m in session.messages
+            if m.get("metadata", {}).get("type") == "compaction"
+        )
+
+        self.sessions.save(session)
+
+        if compactions_after > compactions_before:
+            logger.info(f"Manual compaction completed for {session_key}")
+            await self.bus.publish_outbound(OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content="✅ Conversation compacted",
+            ))
+        else:
+            await self.bus.publish_outbound(OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content="📦 Compaction skipped — nothing to compact.",
+            ))
 
     async def _process_system_message(self, msg: InboundMessage) -> OutboundMessage | None:
         """
@@ -942,6 +1252,22 @@ class AgentLoop:
         if isinstance(cron_tool, CronTool):
             cron_tool.set_context(origin_channel, origin_chat_id)
 
+        exec_bg_tool = self.tools.get("exec_bg")
+        if isinstance(exec_bg_tool, ExecBgTool):
+            exec_bg_tool.set_context(origin_channel, origin_chat_id)
+
+        poll_tool = self.tools.get("poll")
+        if isinstance(poll_tool, PollTool):
+            poll_tool.set_context(origin_channel, origin_chat_id)
+
+        restart_tool = self.tools.get("restart")
+        if isinstance(restart_tool, RestartTool):
+            restart_tool.set_context(origin_channel, origin_chat_id)
+
+        update_tool = self.tools.get("update")
+        if isinstance(update_tool, UpdateTool):
+            update_tool.set_context(origin_channel, origin_chat_id)
+
         # Build messages with the announce content
         messages = self.context.build_messages(
             history=session.get_history(),
@@ -957,9 +1283,16 @@ class AgentLoop:
         # Agent loop
         final_content = None
         compacted_this_turn = False
+        stopped = False
 
         try:
             while True:
+
+                # CHECKPOINT 1 — before LLM call
+                if self._is_stopped(session_key):
+                    logger.info(f"Stop requested before LLM call for {session_key}")
+                    stopped = True
+                    break
 
                 # Cache flush escalation (if TTL expired)
                 flushed = False
@@ -1011,14 +1344,27 @@ class AgentLoop:
                 api_messages = [
                     {k: v for k, v in m.items() if k != "_ts"} for m in messages
                 ]
-                response = await self.provider.chat(
+                response = await self._chat_or_stop(
+                    session_key,
                     messages=api_messages,
                     tools=tools_defs,
-                    model=self.model
+                    model=self.model,
                 )
+
+                # LLM call cancelled by stop
+                if response is None:
+                    logger.info(f"LLM call cancelled by stop for {session_key}")
+                    stopped = True
+                    break
 
                 # Track cache creation/read for flush scheduling
                 self.cache_manager.mark_cache_created(session, response.usage)
+
+                # Stop check after LLM returns (covers final text response)
+                if self._is_stopped(session_key):
+                    logger.info(f"Stop requested after LLM call for {session_key}")
+                    stopped = True
+                    break
 
                 if response.has_tool_calls:
                     # Stream intermediate content to user if enabled
@@ -1045,21 +1391,38 @@ class AgentLoop:
                         messages, response.content, tool_call_dicts
                     )
 
-                    for tool_call in response.tool_calls:
+                    for idx, tool_call in enumerate(response.tool_calls):
+                        # Stop check before each individual tool execution
+                        if self._is_stopped(session_key):
+                            logger.info(
+                                f"Stop requested during tool execution for {session_key}"
+                            )
+                            stopped = True
+                            for remaining in response.tool_calls[idx:]:
+                                messages = self.context.add_tool_result(
+                                    messages, remaining.id, remaining.name,
+                                    "[Stopped by user]"
+                                )
+                            break
+
                         args_str = json.dumps(tool_call.arguments)
                         logger.debug(f"Executing tool: {tool_call.name} with arguments: {args_str}")
                         result = await self.tools.execute(tool_call.name, tool_call.arguments)
                         messages = self.context.add_tool_result(
                             messages, tool_call.id, tool_call.name, result
                         )
+
+                    if stopped:
+                        break
                 else:
                     final_content = response.content
                     break
         finally:
             self.sessions.save(session)
 
-        # Add final assistant message to the messages list
-        messages.append({"role": "assistant", "content": final_content or ""})
+        if not stopped:
+            # Add final assistant message to the messages list
+            messages.append({"role": "assistant", "content": final_content or ""})
 
         # Override the user message content to mark it as system
         messages[new_start]["content"] = f"[System: {msg.sender_id}] {msg.content}"
@@ -1083,7 +1446,7 @@ class AgentLoop:
             session.add_message(m["role"], m.get("content"), msg_metadata=user_meta, **extras)
         self.sessions.save(session)
 
-        if not final_content:
+        if stopped or not final_content:
             return None
 
         return OutboundMessage(
@@ -1120,6 +1483,364 @@ class AgentLoop:
         
         response = await self._process_batch([msg])
         return response.content if response else ""
+
+    def _build_isolated_tool_registry(
+        self, channel: str, chat_id: str,
+    ) -> tuple[ToolRegistry, DeliverResultTool]:
+        """Build a fresh tool registry for an isolated cron job.
+
+        Each invocation creates new tool instances so concurrent isolated jobs
+        share no mutable state.  The ``message`` and ``spawn`` tools are
+        excluded (they don't make sense in non-interactive mode).
+        """
+        reg = ToolRegistry()
+
+        # File tools
+        reg.register(ReadFileTool())
+        reg.register(WriteFileTool())
+        reg.register(EditFileTool())
+        reg.register(ListDirTool())
+
+        # Shell
+        reg.register(ExecTool(
+            working_dir=str(self.workspace),
+            timeout=self.exec_config.timeout,
+            restrict_to_workspace=self.exec_config.restrict_to_workspace,
+        ))
+
+        # Web
+        reg.register(WebSearchTool(engine=self.search_engine, api_key=self.brave_api_key))
+        reg.register(WebFetchTool())
+
+        # Telegram media & reaction
+        send_cb = self.bus.publish_outbound
+        photo_tool = SendPhotoTool(send_callback=send_cb)
+        photo_tool.set_context(channel, chat_id)
+        reg.register(photo_tool)
+
+        video_tool = SendVideoTool(send_callback=send_cb)
+        video_tool.set_context(channel, chat_id)
+        reg.register(video_tool)
+
+        file_tool = SendFileTool(send_callback=send_cb)
+        file_tool.set_context(channel, chat_id)
+        reg.register(file_tool)
+
+        reaction_tool = SetReactionTool(send_callback=send_cb)
+        reaction_tool.set_context(channel, chat_id)
+        reg.register(reaction_tool)
+
+        # Cron
+        if self.cron_service:
+            cron_tool = CronTool(self.cron_service)
+            cron_tool.set_context(channel, chat_id)
+            reg.register(cron_tool)
+
+        # Background execution
+        bg = BackgroundProcessManager(
+            bus=self.bus, workspace=self.workspace, exec_config=self.exec_config,
+        )
+        exec_bg = ExecBgTool(manager=bg)
+        exec_bg.set_context(channel, chat_id)
+        reg.register(exec_bg)
+
+        poll = PollTool(manager=bg)
+        poll.set_context(channel, chat_id)
+        reg.register(poll)
+        reg.register(OutputTool(manager=bg))
+        reg.register(KillTool(manager=bg))
+        reg.register(DismissTool(manager=bg))
+
+        # Config / restart / update
+        config_t = ConfigTool(agent=self)
+        reg.register(config_t)
+        restart_t = RestartTool(agent=self)
+        restart_t.set_context(channel, chat_id)
+        reg.register(restart_t)
+        update_t = UpdateTool(agent=self)
+        update_t.set_context(channel, chat_id)
+        reg.register(update_t)
+
+        # Download file
+        if self.media_manager:
+            dl = DownloadFileTool(self.media_manager)
+            dl.set_context(channel, f"{channel}:{chat_id}")
+            reg.register(dl)
+
+        # deliver_result — isolated-only
+        deliver_tool = DeliverResultTool()
+        reg.register(deliver_tool)
+
+        return reg, deliver_tool
+
+    async def process_cron_isolated(
+        self,
+        job_name: str,
+        message: str,
+        schedule_desc: str,
+        channel: str,
+        chat_id: str,
+    ) -> str | None:
+        """Run an isolated cron job — fresh context, no session history.
+
+        Returns the result string (from deliver_result or final LLM text),
+        or None if the agent produced no output.
+        """
+        tools, deliver_tool = self._build_isolated_tool_registry(channel, chat_id)
+
+        session_metadata = {
+            "cron_isolated": {
+                "job_name": job_name,
+                "schedule_desc": schedule_desc,
+                "task_message": message,
+            },
+        }
+
+        messages = self.context.build_messages(
+            history=[],
+            current_message=message,
+            channel=channel,
+            chat_id=chat_id,
+            session_metadata=session_metadata,
+        )
+
+        max_iterations = 20
+        for _ in range(max_iterations):
+            tools_defs = tools.get_definitions()
+            api_messages = [
+                {k: v for k, v in m.items() if k != "_ts"} for m in messages
+            ]
+            response = await self.provider.chat(
+                messages=api_messages, tools=tools_defs, model=self.model,
+            )
+
+            if response.has_tool_calls:
+                tool_call_dicts = [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.name,
+                            "arguments": json.dumps(tc.arguments),
+                        },
+                    }
+                    for tc in response.tool_calls
+                ]
+                messages = self.context.add_assistant_message(
+                    messages, response.content, tool_call_dicts,
+                )
+
+                for tc in response.tool_calls:
+                    result = await tools.execute(tc.name, tc.arguments)
+                    messages = self.context.add_tool_result(
+                        messages, tc.id, tc.name, result,
+                    )
+
+                # If deliver_result was called, return immediately
+                if deliver_tool.result is not None:
+                    return deliver_tool.result
+            else:
+                # Agent finished with text — use as fallback result
+                return response.content or None
+
+        # Exhausted iterations — return whatever deliver_tool captured
+        return deliver_tool.result
+
+    def _build_heartbeat_tool_registry(
+        self,
+        channel: str,
+        chat_id: str,
+    ) -> tuple[ToolRegistry, DeliverResultTool, HeartbeatDoneTool]:
+        """Build a tool registry for heartbeat execution.
+
+        Extends the isolated registry with HeartbeatTool and HeartbeatDoneTool.
+        """
+        reg, deliver_tool = self._build_isolated_tool_registry(channel, chat_id)
+
+        done_tool = HeartbeatDoneTool()
+        reg.register(done_tool)
+
+        heartbeat_tool = HeartbeatTool(workspace=self.workspace)
+        reg.register(heartbeat_tool)
+
+        return reg, deliver_tool, done_tool
+
+    async def process_heartbeat(self) -> tuple[str | None, str | None, str | None]:
+        """Run a heartbeat check — isolated context with rolling session.
+
+        Returns (result, channel, chat_id):
+            - result: content from deliver_result, or None if heartbeat_done
+            - channel, chat_id: last active chat for delivery (None if no active chat)
+        """
+        channel, chat_id = self.last_active_chat or (None, None)
+        tools, deliver_tool, done_tool = self._build_heartbeat_tool_registry(
+            channel or "cli", chat_id or "direct",
+        )
+
+        # Load rolling session
+        session = self.sessions.get_or_create("heartbeat:isolated")
+
+        # Build tasks summary from HEARTBEAT.md
+        hb_path = self.workspace / "HEARTBEAT.md"
+        tasks_summary = "No tasks."
+        if hb_path.exists():
+            content = hb_path.read_text(encoding="utf-8")
+            blocks = parse_blocks(content)
+            if blocks:
+                lines = [f"- [{b['id']}] {b['message'][:50]}" for b in blocks]
+                tasks_summary = "\n".join(lines)
+
+        session_metadata = {
+            "heartbeat_isolated": {
+                "tasks_summary": tasks_summary,
+            },
+        }
+
+        messages = self.context.build_messages(
+            history=session.get_history(),
+            current_message="Execute heartbeat check.",
+            channel=channel,
+            chat_id=chat_id,
+            session_metadata=session_metadata,
+        )
+
+        # Track where new messages start (for session persistence)
+        new_start = len(messages) - 1  # the user message we just added
+
+        max_iterations = 20
+        result = None
+        for _ in range(max_iterations):
+            tools_defs = tools.get_definitions()
+
+            # Safety flush: only if context exceeds 80% of max (unlikely
+            # in a single run, but guards against extreme cases). During
+            # normal execution, full tool results are preserved — the real
+            # trimming happens after the run in _trim_heartbeat_session.
+            safety_limit = int(self.max_context_tokens * 0.8)
+            actual_tokens = self.cache_manager.estimate_context_tokens(
+                messages, self.model, tools=tools_defs,
+            )
+            if actual_tokens > safety_limit:
+                logger.warning(
+                    f"Heartbeat safety flush: {actual_tokens} tokens "
+                    f"exceed {safety_limit} safety limit"
+                )
+                CacheManager._flush_tool_results(messages, "hard")
+
+            api_messages = [
+                {k: v for k, v in m.items() if k != "_ts"} for m in messages
+            ]
+            response = await self.provider.chat(
+                messages=api_messages, tools=tools_defs, model=self.model,
+            )
+
+            if response.has_tool_calls:
+                tool_call_dicts = [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.name,
+                            "arguments": json.dumps(tc.arguments),
+                        },
+                    }
+                    for tc in response.tool_calls
+                ]
+                messages = self.context.add_assistant_message(
+                    messages, response.content, tool_call_dicts,
+                )
+
+                for tc in response.tool_calls:
+                    tc_result = await tools.execute(tc.name, tc.arguments)
+                    messages = self.context.add_tool_result(
+                        messages, tc.id, tc.name, tc_result,
+                    )
+
+                if deliver_tool.result is not None:
+                    result = deliver_tool.result
+                    break
+                if done_tool.done:
+                    result = None
+                    break
+            else:
+                # Text response — treat as done with no result
+                messages.append({"role": "assistant", "content": response.content or ""})
+                result = None
+                break
+
+        # Save new messages to rolling session
+        for m in messages[new_start:]:
+            extras: dict[str, Any] = {}
+            if "tool_calls" in m:
+                extras["tool_calls"] = m["tool_calls"]
+            if "tool_call_id" in m:
+                extras["tool_call_id"] = m["tool_call_id"]
+            if "name" in m:
+                extras["name"] = m["name"]
+            session.add_message(m["role"], m.get("content"), **extras)
+        self.sessions.save(session)
+
+        # Trim rolling session to stay within budget
+        self._trim_heartbeat_session(session)
+
+        return result, channel, chat_id
+
+    def _trim_heartbeat_session(self, session, max_tokens: int = 20_000) -> None:
+        """Trim heartbeat session to stay under max_tokens.
+
+        Flushes tool results first so the token count reflects what will
+        actually be sent to the API on the next heartbeat run.
+        """
+        from ragnarbot.agent.tokens import estimate_messages_tokens
+
+        provider = self.cache_manager.get_provider_from_model(self.model)
+        history = session.get_history()
+
+        # Flush tool results before counting — these will be flushed by
+        # the safety check on the next run anyway, so counting them at
+        # full size would cause us to discard useful messages prematurely.
+        CacheManager._flush_tool_results(history, "hard")
+
+        total = estimate_messages_tokens(history, provider)
+        if total <= max_tokens:
+            # Still save — flush may have shrunk tool results
+            self._rebuild_session(session, history)
+            return
+
+        # Remove oldest messages, keeping tool-call groups intact
+        while total > max_tokens and history:
+            msg = history[0]
+            # If this is a tool result, also remove the preceding assistant
+            # message with matching tool_calls (already removed or not present
+            # at index 0). Just remove the oldest message.
+            history.pop(0)
+
+            # If we removed an assistant message with tool_calls, also remove
+            # all its subsequent tool results
+            if msg.get("tool_calls"):
+                tool_call_ids = {
+                    tc.get("id") for tc in msg.get("tool_calls", [])
+                }
+                while history and history[0].get("tool_call_id") in tool_call_ids:
+                    history.pop(0)
+
+            total = estimate_messages_tokens(history, provider)
+
+        self._rebuild_session(session, history)
+
+    def _rebuild_session(self, session, history: list[dict]) -> None:
+        """Rebuild and save session messages from a processed history list."""
+        session.messages = []
+        for m in history:
+            extras: dict[str, Any] = {}
+            if "tool_calls" in m:
+                extras["tool_calls"] = m["tool_calls"]
+            if "tool_call_id" in m:
+                extras["tool_call_id"] = m["tool_call_id"]
+            if "name" in m:
+                extras["name"] = m["name"]
+            session.add_message(m["role"], m.get("content"), **extras)
+        self.sessions.save(session)
 
     def get_context_tokens(
         self,

@@ -24,8 +24,9 @@ class ContextBuilder:
     BUILTIN_FILES = ["SOUL.md", "AGENTS.md", "BUILTIN_TOOLS.md"]
     BOOTSTRAP_FILES = ["IDENTITY.md", "USER.md", "TOOLS.md"]
 
-    def __init__(self, workspace: Path):
+    def __init__(self, workspace: Path, heartbeat_interval_m: int = 30):
         self.workspace = workspace
+        self.heartbeat_interval_m = heartbeat_interval_m
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace)
         self._ensure_bootstrap_files()
@@ -60,6 +61,20 @@ class ContextBuilder:
             telegram = self._load_builtin_telegram(session_metadata["user_data"])
             if telegram:
                 parts.append(telegram)
+
+        # 3b. Cron isolated mode (conditional)
+        if session_metadata and session_metadata.get("cron_isolated"):
+            cron_ctx = session_metadata["cron_isolated"]
+            cron_isolated = self._load_builtin_cron_isolated(cron_ctx)
+            if cron_isolated:
+                parts.append(cron_isolated)
+
+        # 3c. Heartbeat isolated mode (conditional)
+        if session_metadata and session_metadata.get("heartbeat_isolated"):
+            hb_ctx = session_metadata["heartbeat_isolated"]
+            hb_isolated = self._load_builtin_heartbeat_isolated(hb_ctx)
+            if hb_isolated:
+                parts.append(hb_isolated)
 
         # 4. Bootstrap protocol (first-run only, self-deleting)
         bootstrap_protocol = self.workspace / "BOOTSTRAP.md"
@@ -124,12 +139,15 @@ Skills with available="false" need dependencies installed first - you can try in
                 content = content.format(
                     workspace_path=workspace_path,
                     timezone=timezone,
+                    heartbeat_interval_m=self.heartbeat_interval_m,
                 )
                 parts.append(content)
         return "\n\n---\n\n".join(parts) if parts else ""
 
     def _load_builtin_telegram(self, user_data: dict) -> str:
         """Load the built-in Telegram context file with user placeholders."""
+        from telegram.constants import ReactionEmoji
+
         file_path = BUILTIN_DIR / "TELEGRAM.md"
         if not file_path.exists():
             return ""
@@ -137,10 +155,38 @@ Skills with available="false" need dependencies installed first - you can try in
         full_name = " ".join(
             filter(None, [user_data.get("first_name"), user_data.get("last_name")])
         )
+        reaction_emojis = " ".join(e.value for e in ReactionEmoji)
         return content.format(
             full_name=full_name or "Unknown",
             username=user_data.get("username") or "N/A",
             user_id=user_data.get("user_id") or "N/A",
+            reaction_emojis=reaction_emojis,
+        )
+
+    def _load_builtin_cron_isolated(self, cron_ctx: dict) -> str:
+        """Load the cron isolated mode system prompt with placeholders."""
+        import time as _time
+        file_path = BUILTIN_DIR / "CRON_ISOLATED.md"
+        if not file_path.exists():
+            return ""
+        content = file_path.read_text(encoding="utf-8")
+        return content.format(
+            job_name=cron_ctx.get("job_name", "Unknown"),
+            schedule_desc=cron_ctx.get("schedule_desc", "Unknown"),
+            current_time=_time.strftime("%Y-%m-%d %H:%M:%S %Z"),
+            task_message=cron_ctx.get("task_message", ""),
+        )
+
+    def _load_builtin_heartbeat_isolated(self, hb_ctx: dict) -> str:
+        """Load the heartbeat isolated mode system prompt with placeholders."""
+        import time as _time
+        file_path = BUILTIN_DIR / "HEARTBEAT_ISOLATED.md"
+        if not file_path.exists():
+            return ""
+        content = file_path.read_text(encoding="utf-8")
+        return content.format(
+            current_time=_time.strftime("%Y-%m-%d %H:%M:%S %Z"),
+            tasks_summary=hb_ctx.get("tasks_summary", "No tasks."),
         )
 
     def _load_bootstrap_files(self) -> str:

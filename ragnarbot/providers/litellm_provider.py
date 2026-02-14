@@ -42,8 +42,8 @@ class LiteLLMProvider(LLMProvider):
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
         model: str | None = None,
-        max_tokens: int = 4096,
-        temperature: float = 0.7,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
     ) -> LLMResponse:
         """
         Send a chat completion request via LiteLLM.
@@ -59,6 +59,8 @@ class LiteLLMProvider(LLMProvider):
             LLMResponse with content and/or tool calls.
         """
         model = model or self.default_model
+        max_tokens = max_tokens if max_tokens is not None else self.default_max_tokens
+        temperature = temperature if temperature is not None else self.default_temperature
 
         # For Gemini, ensure gemini/ prefix if not already present
         if "gemini" in model.lower() and not model.startswith("gemini/"):

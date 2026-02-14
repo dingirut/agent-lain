@@ -213,8 +213,13 @@ def gateway_main(
             default_model=config.agents.defaults.model,
         )
 
+    # Apply config defaults to provider (base class starts with hardcoded values)
+    provider.set_temperature(config.agents.defaults.temperature)
+    provider.set_max_tokens(config.agents.defaults.max_tokens)
+
     # Service credentials
     brave_api_key = creds.services.brave_search.api_key or None
+    search_engine = config.tools.web.search.engine
 
     # Create media manager
     media_dir = get_data_dir() / "media"
@@ -232,6 +237,7 @@ def gateway_main(
         workspace=config.workspace_path,
         model=config.agents.defaults.model,
         brave_api_key=brave_api_key,
+        search_engine=search_engine,
         exec_config=config.tools.exec,
         cron_service=cron,
         stream_steps=config.agents.defaults.stream_steps,
@@ -239,37 +245,136 @@ def gateway_main(
         debounce_seconds=config.agents.defaults.debounce_seconds,
         max_context_tokens=config.agents.defaults.max_context_tokens,
         context_mode=config.agents.defaults.context_mode,
+        heartbeat_interval_m=config.heartbeat.interval_m,
     )
 
     # Set cron callback (needs agent)
+    def _format_schedule(schedule) -> str:
+        if schedule.kind == "every" and schedule.every_ms:
+            secs = schedule.every_ms // 1000
+            if secs >= 3600:
+                return f"every {secs // 3600}h"
+            if secs >= 60:
+                return f"every {secs // 60}m"
+            return f"every {secs}s"
+        if schedule.kind == "cron" and schedule.expr:
+            return f"cron({schedule.expr})"
+        if schedule.kind == "at":
+            return "one-time"
+        return "unknown"
+
     async def on_cron_job(job: CronJob) -> str | None:
         """Execute a cron job through the agent."""
-        response = await agent.process_direct(
-            job.payload.message,
-            session_key=f"cron:{job.id}",
-            channel=job.payload.channel or "cli",
-            chat_id=job.payload.to or "direct",
-        )
-        if job.payload.deliver and job.payload.to:
-            from ragnarbot.bus.events import OutboundMessage
-            await bus.publish_outbound(OutboundMessage(
-                channel=job.payload.channel or "cli",
-                chat_id=job.payload.to,
-                content=response or ""
-            ))
+        import time as _time
+        from ragnarbot.cron.logger import log_execution
+
+        start_time = _time.time()
+        response = None
+        status = "ok"
+        error = None
+
+        try:
+            if job.payload.mode == "session":
+                # Inject into user's active session via inbound queue
+                cron_header = f"[Cron task: {job.name}]\n---\n{job.payload.message}"
+                from ragnarbot.bus.events import InboundMessage
+                await bus.publish_inbound(InboundMessage(
+                    channel=job.payload.channel or "cli",
+                    sender_id="cron",
+                    chat_id=job.payload.to or "direct",
+                    content=cron_header,
+                    metadata={"cron_job_id": job.id},
+                ))
+                response = "(queued to session)"
+            else:
+                # Isolated mode — fully parallel, no locks
+                schedule_desc = _format_schedule(job.schedule)
+                response = await agent.process_cron_isolated(
+                    job_name=job.name,
+                    message=job.payload.message,
+                    schedule_desc=schedule_desc,
+                    channel=job.payload.channel or "cli",
+                    chat_id=job.payload.to or "direct",
+                )
+                # Deliver result to user
+                if response and job.payload.to:
+                    from ragnarbot.bus.events import OutboundMessage
+                    await bus.publish_outbound(OutboundMessage(
+                        channel=job.payload.channel or "cli",
+                        chat_id=job.payload.to,
+                        content=response,
+                    ))
+        except Exception as e:
+            status = "error"
+            error = str(e)
+            raise
+        finally:
+            duration = _time.time() - start_time
+            log_execution(job, response, status, duration, error)
+
+            # Append a silent marker to the user's active session so the
+            # main agent knows an isolated job ran (without triggering a turn).
+            if job.payload.mode == "isolated" and job.payload.to:
+                try:
+                    channel = job.payload.channel or "cli"
+                    session_key = f"{channel}:{job.payload.to}"
+                    session = agent.sessions.get_or_create(session_key)
+                    ts = _time.strftime("%Y-%m-%d %H:%M:%S")
+                    marker = (
+                        f"[Cron result: {job.name} | id: {job.id} "
+                        f"| {ts} | status: {status}]"
+                    )
+                    session.add_message("assistant", marker)
+                    agent.sessions.save(session)
+                except Exception as marker_err:
+                    from loguru import logger as _log
+                    _log.warning(f"Failed to save cron marker: {marker_err}")
+
         return response
     cron.on_job = on_cron_job
 
     # Create heartbeat service
-    async def on_heartbeat(prompt: str) -> str:
-        """Execute heartbeat through the agent."""
-        return await agent.process_direct(prompt, session_key="heartbeat")
+    import time as _time
+    from ragnarbot.bus.events import InboundMessage as _InboundMessage
+
+    async def on_heartbeat() -> tuple[str | None, str | None, str | None]:
+        return await agent.process_heartbeat()
+
+    async def on_heartbeat_deliver(result: str, channel: str, chat_id: str):
+        """Phase 2: inject heartbeat result into user's active chat."""
+        await bus.publish_inbound(_InboundMessage(
+            channel=channel,
+            sender_id="heartbeat",
+            chat_id=chat_id,
+            content=f"[Heartbeat report]\n---\n{result}",
+            metadata={
+                "heartbeat_result": True,
+                "system_note": (
+                    "[System] This is an internal message — the user does not see it. "
+                    "Relay the results to the user naturally, in the tone and context "
+                    "of your conversation. Do not mention the heartbeat mechanism."
+                ),
+            },
+        ))
+
+    async def on_heartbeat_complete(channel: str | None, chat_id: str | None):
+        """Save silent marker to user's session."""
+        if not channel or not chat_id:
+            return
+        session_key = f"{channel}:{chat_id}"
+        session = agent.sessions.get_or_create(session_key)
+        ts = _time.strftime("%Y-%m-%d %H:%M:%S")
+        marker = f"[Heartbeat check | {ts} | silent]"
+        session.add_message("assistant", marker)
+        agent.sessions.save(session)
 
     heartbeat = HeartbeatService(
         workspace=config.workspace_path,
         on_heartbeat=on_heartbeat,
-        interval_s=30 * 60,  # 30 minutes
-        enabled=True
+        on_deliver=on_heartbeat_deliver,
+        on_complete=on_heartbeat_complete,
+        interval_m=config.heartbeat.interval_m,
+        enabled=config.heartbeat.enabled,
     )
 
     # Create channel manager
@@ -284,7 +389,8 @@ def gateway_main(
     if cron_status["jobs"] > 0:
         console.print(f"[green]✓[/green] Cron: {cron_status['jobs']} scheduled jobs")
 
-    console.print("[green]✓[/green] Heartbeat: every 30m")
+    hb_status = f"every {config.heartbeat.interval_m}m" if config.heartbeat.enabled else "disabled"
+    console.print(f"[green]✓[/green] Heartbeat: {hb_status}")
 
     pid_path = Path.home() / ".ragnarbot" / "gateway.pid"
 
@@ -292,6 +398,67 @@ def gateway_main(
         # Write PID file
         pid_path.parent.mkdir(parents=True, exist_ok=True)
         pid_path.write_text(str(os.getpid()))
+
+        # If this is a post-update restart, notify the originating channel
+        from ragnarbot.agent.tools.update import UPDATE_MARKER, GITHUB_REPO
+        if UPDATE_MARKER.exists():
+            try:
+                import json as _json
+                marker = _json.loads(UPDATE_MARKER.read_text())
+                origin_channel = marker["channel"]
+                origin_chat_id = marker["chat_id"]
+                old_ver = marker.get("old_version", "?")
+                new_ver = marker.get("new_version", "?")
+                changelog_url = (
+                    f"https://github.com/{GITHUB_REPO}/compare/v{old_ver}...v{new_ver}"
+                )
+                from ragnarbot.bus.events import InboundMessage
+                await bus.publish_inbound(InboundMessage(
+                    channel="system",
+                    sender_id="gateway",
+                    chat_id=f"{origin_channel}:{origin_chat_id}",
+                    content=(
+                        f"[System: ragnarbot updated from v{old_ver} to v{new_ver}. "
+                        f"Changelog: {changelog_url}]"
+                    ),
+                ))
+                console.print(
+                    f"[green]✓[/green] Post-update notification queued "
+                    f"for {origin_channel}:{origin_chat_id} (v{old_ver} → v{new_ver})"
+                )
+            except Exception as e:
+                console.print(
+                    f"[yellow]Warning: could not inject update notification: {e}[/yellow]"
+                )
+            finally:
+                UPDATE_MARKER.unlink(missing_ok=True)
+
+        # If this is a restart, inject a notification into the originating channel
+        from ragnarbot.agent.tools.restart import RESTART_MARKER
+        if RESTART_MARKER.exists():
+            try:
+                import json as _json
+                marker = _json.loads(RESTART_MARKER.read_text())
+                origin_channel = marker["channel"]
+                origin_chat_id = marker["chat_id"]
+                from ragnarbot.bus.events import InboundMessage
+                await bus.publish_inbound(InboundMessage(
+                    channel="system",
+                    sender_id="gateway",
+                    chat_id=f"{origin_channel}:{origin_chat_id}",
+                    content=(
+                        "[System: gateway restarted successfully. "
+                        "Config changes are now active.]"
+                    ),
+                ))
+                console.print(
+                    f"[green]✓[/green] Post-restart notification queued "
+                    f"for {origin_channel}:{origin_chat_id}"
+                )
+            except Exception as e:
+                console.print(f"[yellow]Warning: could not inject restart notification: {e}[/yellow]")
+            finally:
+                RESTART_MARKER.unlink(missing_ok=True)
 
         # SIGUSR1 handler for config reload
         reload_event = asyncio.Event()
@@ -318,21 +485,42 @@ def gateway_main(
         try:
             await cron.start()
             await heartbeat.start()
-            await asyncio.gather(
-                agent.run(),
-                channels.start_all(),
-                _config_reloader(),
-            )
+
+            agent_task = asyncio.create_task(agent.run())
+            channel_task = asyncio.create_task(channels.start_all())
+            reloader_task = asyncio.create_task(_config_reloader())
+
+            # Wait for agent to finish (normal stop or restart request)
+            await agent_task
+
+            # Cancel other tasks
+            for task in [channel_task, reloader_task]:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+
+            # Cleanup
+            heartbeat.stop()
+            cron.stop()
+            await channels.stop_all()
         except KeyboardInterrupt:
             console.print("\nShutting down...")
             heartbeat.stop()
             cron.stop()
             agent.stop()
             await channels.stop_all()
-        finally:
-            pid_path.unlink(missing_ok=True)
 
     asyncio.run(run())
+
+    if agent.restart_requested:
+        pid_path.unlink(missing_ok=True)
+        console.print("[green]✓[/green] Restarting gateway...")
+        import sys
+        os.execv(sys.executable, [sys.executable] + sys.argv)
+    else:
+        pid_path.unlink(missing_ok=True)
 
 
 @gateway_app.command("start")
@@ -613,164 +801,6 @@ def channels_status():
     table.add_row("Web", "✓" if web_cfg.enabled else "✗", web_info)
 
     console.print(table)
-
-
-
-# ============================================================================
-# Cron Commands
-# ============================================================================
-
-cron_app = typer.Typer(help="Manage scheduled tasks")
-app.add_typer(cron_app, name="cron")
-
-
-@cron_app.command("list")
-def cron_list(
-    all: bool = typer.Option(False, "--all", "-a", help="Include disabled jobs"),
-):
-    """List scheduled jobs."""
-    from ragnarbot.config.loader import get_data_dir
-    from ragnarbot.cron.service import CronService
-
-    store_path = get_data_dir() / "cron" / "jobs.json"
-    service = CronService(store_path)
-
-    jobs = service.list_jobs(include_disabled=all)
-
-    if not jobs:
-        console.print("No scheduled jobs.")
-        return
-
-    table = Table(title="Scheduled Jobs")
-    table.add_column("ID", style="cyan")
-    table.add_column("Name")
-    table.add_column("Schedule")
-    table.add_column("Status")
-    table.add_column("Next Run")
-
-    import time
-    for job in jobs:
-        # Format schedule
-        if job.schedule.kind == "every":
-            sched = f"every {(job.schedule.every_ms or 0) // 1000}s"
-        elif job.schedule.kind == "cron":
-            sched = job.schedule.expr or ""
-        else:
-            sched = "one-time"
-
-        # Format next run
-        next_run = ""
-        if job.state.next_run_at_ms:
-            next_time = time.strftime("%Y-%m-%d %H:%M", time.localtime(job.state.next_run_at_ms / 1000))
-            next_run = next_time
-
-        status = "[green]enabled[/green]" if job.enabled else "[dim]disabled[/dim]"
-
-        table.add_row(job.id, job.name, sched, status, next_run)
-
-    console.print(table)
-
-
-@cron_app.command("add")
-def cron_add(
-    name: str = typer.Option(..., "--name", "-n", help="Job name"),
-    message: str = typer.Option(..., "--message", "-m", help="Message for agent"),
-    every: int = typer.Option(None, "--every", "-e", help="Run every N seconds"),
-    cron_expr: str = typer.Option(None, "--cron", "-c", help="Cron expression (e.g. '0 9 * * *')"),
-    at: str = typer.Option(None, "--at", help="Run once at time (ISO format)"),
-    deliver: bool = typer.Option(False, "--deliver", "-d", help="Deliver response to channel"),
-    to: str = typer.Option(None, "--to", help="Recipient for delivery"),
-    channel: str = typer.Option(None, "--channel", help="Channel for delivery (e.g. 'telegram')"),
-):
-    """Add a scheduled job."""
-    from ragnarbot.config.loader import get_data_dir
-    from ragnarbot.cron.service import CronService
-    from ragnarbot.cron.types import CronSchedule
-
-    # Determine schedule type
-    if every:
-        schedule = CronSchedule(kind="every", every_ms=every * 1000)
-    elif cron_expr:
-        schedule = CronSchedule(kind="cron", expr=cron_expr)
-    elif at:
-        import datetime
-        dt = datetime.datetime.fromisoformat(at)
-        schedule = CronSchedule(kind="at", at_ms=int(dt.timestamp() * 1000))
-    else:
-        console.print("[red]Error: Must specify --every, --cron, or --at[/red]")
-        raise typer.Exit(1)
-
-    store_path = get_data_dir() / "cron" / "jobs.json"
-    service = CronService(store_path)
-
-    job = service.add_job(
-        name=name,
-        schedule=schedule,
-        message=message,
-        deliver=deliver,
-        to=to,
-        channel=channel,
-    )
-
-    console.print(f"[green]✓[/green] Added job '{job.name}' ({job.id})")
-
-
-@cron_app.command("remove")
-def cron_remove(
-    job_id: str = typer.Argument(..., help="Job ID to remove"),
-):
-    """Remove a scheduled job."""
-    from ragnarbot.config.loader import get_data_dir
-    from ragnarbot.cron.service import CronService
-
-    store_path = get_data_dir() / "cron" / "jobs.json"
-    service = CronService(store_path)
-
-    if service.remove_job(job_id):
-        console.print(f"[green]✓[/green] Removed job {job_id}")
-    else:
-        console.print(f"[red]Job {job_id} not found[/red]")
-
-
-@cron_app.command("enable")
-def cron_enable(
-    job_id: str = typer.Argument(..., help="Job ID"),
-    disable: bool = typer.Option(False, "--disable", help="Disable instead of enable"),
-):
-    """Enable or disable a job."""
-    from ragnarbot.config.loader import get_data_dir
-    from ragnarbot.cron.service import CronService
-
-    store_path = get_data_dir() / "cron" / "jobs.json"
-    service = CronService(store_path)
-
-    job = service.enable_job(job_id, enabled=not disable)
-    if job:
-        status = "disabled" if disable else "enabled"
-        console.print(f"[green]✓[/green] Job '{job.name}' {status}")
-    else:
-        console.print(f"[red]Job {job_id} not found[/red]")
-
-
-@cron_app.command("run")
-def cron_run(
-    job_id: str = typer.Argument(..., help="Job ID to run"),
-    force: bool = typer.Option(False, "--force", "-f", help="Run even if disabled"),
-):
-    """Manually run a job."""
-    from ragnarbot.config.loader import get_data_dir
-    from ragnarbot.cron.service import CronService
-
-    store_path = get_data_dir() / "cron" / "jobs.json"
-    service = CronService(store_path)
-
-    async def run():
-        return await service.run_job(job_id, force=force)
-
-    if asyncio.run(run()):
-        console.print("[green]✓[/green] Job executed")
-    else:
-        console.print(f"[red]Failed to run job {job_id}[/red]")
 
 
 # ============================================================================
