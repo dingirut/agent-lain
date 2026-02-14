@@ -485,6 +485,14 @@ class WebChannel(BaseChannel):
                             metadata={"command": "delete_session", "session_id": del_sid},
                         )
 
+                    elif command == "compact":
+                        await self._handle_message(
+                            sender_id=device_id,
+                            chat_id=device_id,
+                            content="/compact",
+                            metadata={"command": "compact"},
+                        )
+
                     elif command == "stop":
                         await self._handle_message(
                             sender_id=device_id,

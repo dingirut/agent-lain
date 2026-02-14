@@ -181,7 +181,7 @@
     flex-shrink: 0;
   }
 
-  #sidebar-btn {
+  .header-right button {
     background: none;
     border: 1px solid var(--border);
     color: var(--text-dim);
@@ -193,9 +193,14 @@
     line-height: 1;
   }
 
-  #sidebar-btn:hover {
+  .header-right button:hover {
     border-color: var(--accent);
     color: var(--text);
+  }
+
+  #compact-btn:disabled {
+    opacity: 0.4;
+    cursor: default;
   }
 
   /* Sidebar */
@@ -635,6 +640,7 @@
       </div>
     </div>
     <div class="header-right">
+      <button id="compact-btn" title="Compact conversation">&#128230;</button>
       <button id="sidebar-btn" title="Chats">&#9776;</button>
     </div>
   </header>
@@ -685,6 +691,7 @@ document.addEventListener("DOMContentLoaded", function() {
   const sendBtn = document.getElementById("send-btn");
   const newChatBtn = document.getElementById("new-chat-btn");
   const sidebarBtn = document.getElementById("sidebar-btn");
+  const compactBtn = document.getElementById("compact-btn");
   const sidebar = document.getElementById("sidebar");
   const sidebarOverlay = document.getElementById("sidebar-overlay");
   const sessionListEl = document.getElementById("session-list");
@@ -858,6 +865,12 @@ document.addEventListener("DOMContentLoaded", function() {
 
       case "message":
         addMessage("bot", data.content, data.intermediate, null, data.media);
+        // Reset compact button and refresh context bar when result arrives
+        if (data.content && (data.content.indexOf("Compact") !== -1 || data.content.indexOf("compact") !== -1)) {
+          compactBtn.disabled = false;
+          compactBtn.title = "Compact conversation";
+          ws.send(JSON.stringify({ type: "command", command: "context_info" }));
+        }
         break;
 
       case "user_echo":
@@ -980,6 +993,13 @@ document.addEventListener("DOMContentLoaded", function() {
   });
 
   sidebarOverlay.addEventListener("click", closeSidebar);
+
+  compactBtn.addEventListener("click", function() {
+    if (!connected || compactBtn.disabled) return;
+    compactBtn.disabled = true;
+    compactBtn.title = "Compacting...";
+    ws.send(JSON.stringify({ type: "command", command: "compact" }));
+  });
 
   function renderSessionList(sessions) {
     sessionListEl.innerHTML = "";
