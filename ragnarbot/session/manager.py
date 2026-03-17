@@ -221,6 +221,9 @@ def _build_message_prefix(metadata: dict, include_timestamp: bool = True) -> str
         if ts_str:
             lines.append(f"[{ts_str}]")
 
+    if metadata.get("type") == "steering":
+        lines.append("[Steering message during active task]")
+
     # Reply context — inline quoted content
     reply = metadata.get("reply_to")
     if reply and isinstance(reply, dict):
@@ -333,6 +336,12 @@ class SessionManager:
             return data.get("session_id")
         except Exception:
             return None
+
+    def get_by_id(self, session_id: str) -> Session | None:
+        """Load a session by its concrete session ID."""
+        if session_id in self._cache:
+            return self._cache[session_id]
+        return self._load(session_id, "")
 
     def set_active(self, user_key: str, session_id: str) -> None:
         """Write the active session pointer for a user."""

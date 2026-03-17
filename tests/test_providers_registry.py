@@ -1,6 +1,6 @@
 """Tests for provider models registry."""
 
-from ragnarbot.config.providers import PROVIDERS, get_provider, get_models, supports_oauth
+from ragnarbot.config.providers import PROVIDERS, get_models, get_provider, supports_oauth
 
 
 def test_providers_has_expected_entries():
@@ -49,6 +49,40 @@ def test_get_models_returns_list():
     models = get_models("anthropic")
     assert len(models) == 4
     assert models[0]["id"] == "anthropic/claude-opus-4-6"
+
+
+def test_openai_models_include_gpt_5_4_first():
+    models = get_models("openai")
+    model_ids = [m["id"] for m in models]
+
+    assert models[0]["id"] == "openai/gpt-5.4"
+    assert "openai/gpt-5.2" in model_ids
+    assert "openai/gpt-5-mini" in model_ids
+
+
+def test_openrouter_models_include_gpt_5_4():
+    models = get_models("openrouter")
+    model_ids = [m["id"] for m in models]
+
+    assert "openrouter/openai/gpt-5.4" in model_ids
+    assert "openrouter/openai/gpt-5.2" in model_ids
+
+
+def test_gemini_models_include_3_1_pro_first():
+    models = get_models("gemini")
+    model_ids = [m["id"] for m in models]
+
+    assert models[0]["id"] == "gemini/gemini-3.1-pro-preview"
+    assert "gemini/gemini-3-pro-preview" in model_ids
+    assert "gemini/gemini-3-flash-preview" in model_ids
+
+
+def test_openrouter_models_include_gemini_3_1_pro():
+    models = get_models("openrouter")
+    model_ids = [m["id"] for m in models]
+
+    assert "openrouter/google/gemini-3.1-pro-preview" in model_ids
+    assert "openrouter/google/gemini-3-pro-preview" in model_ids
 
 
 def test_get_models_empty_for_unknown():
