@@ -38,9 +38,15 @@ class ChannelCredential(BaseModel):
     bot_token: str = ""
 
 
+class WebCredential(BaseModel):
+    """Credentials for the Web UI channel."""
+    password_hash: str = ""  # MD5 hex digest
+
+
 class ChannelsCredentials(BaseModel):
     """Credentials for chat channels."""
     telegram: ChannelCredential = Field(default_factory=ChannelCredential)
+    web: WebCredential = Field(default_factory=WebCredential)
 
 
 class Credentials(BaseModel):

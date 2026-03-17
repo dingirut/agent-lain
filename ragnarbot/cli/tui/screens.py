@@ -14,7 +14,7 @@ def provider_screen(console: Console) -> int | None:
         console,
         "Choose your LLM provider",
         options,
-        subtitle="Step 1 of 8",
+        subtitle="Step 1 of 9",
         back_label="Quit",
     )
 
@@ -35,7 +35,7 @@ def auth_method_screen(console: Console, provider_id: str) -> int | None:
         console,
         "Choose authentication method",
         options,
-        subtitle=f"Step 2 of 8 — {get_provider(provider_id)['name']}",
+        subtitle=f"Step 2 of 9 — {get_provider(provider_id)['name']}",
     )
 
 
@@ -58,7 +58,7 @@ def token_input_screen(
         prompt,
         hint=hint,
         secret=False,
-        subtitle=f"Step 3 of 8 — {provider['name']}",
+        subtitle=f"Step 3 of 9 — {provider['name']}",
     )
 
 
@@ -71,7 +71,7 @@ def model_screen(console: Console, provider_id: str) -> int | None:
         console,
         "Choose your default model",
         options,
-        subtitle=f"Step 4 of 8 — {provider['name']}",
+        subtitle=f"Step 4 of 9 — {provider['name']}",
     )
 
 
@@ -89,7 +89,7 @@ def telegram_screen(console: Console) -> str | None:
             "  Press Enter with empty input to skip"
         ),
         allow_empty=True,
-        subtitle="Step 5 of 8 — Optional",
+        subtitle="Step 5 of 9 — Optional",
     )
 
     if token is None or token == "":
@@ -120,7 +120,7 @@ def _validate_telegram_token(console: Console, token: str) -> str | None:
                     f"Name: [bold]{bot_name}[/bold]",
                     f"Username: @{bot_username}",
                 ],
-                subtitle="Step 5 of 8",
+                subtitle="Step 5 of 9",
             )
             return token
         else:
@@ -134,7 +134,7 @@ def _validate_telegram_token(console: Console, token: str) -> str | None:
                     "",
                     "Press Enter to try again, or Esc to skip.",
                 ],
-                subtitle="Step 5 of 8",
+                subtitle="Step 5 of 9",
             )
             return None
     except httpx.RequestError as e:
@@ -148,9 +148,52 @@ def _validate_telegram_token(console: Console, token: str) -> str | None:
                 "",
                 "Press Enter to try again, or Esc to skip.",
             ],
-            subtitle="Step 5 of 8",
+            subtitle="Step 5 of 9",
         )
         return None
+
+
+def web_ui_screen(console: Console) -> tuple[str, str] | None:
+    """Web UI setup. Returns (password, allowed_ips) or ("","") for skip, or None (back)."""
+    password = text_input(
+        console,
+        "Web UI setup",
+        "Password",
+        hint=(
+            "Set a password for the Web UI dashboard.\n"
+            "  This will be hashed and stored securely.\n"
+            "\n"
+            "  Press Enter with empty input to skip"
+        ),
+        secret=True,
+        allow_empty=True,
+        subtitle="Step 6 of 9 -- Optional",
+    )
+
+    if password is None:
+        return None
+    if password == "":
+        return ("", "")
+
+    # Ask for IP allowlist
+    allowed_ips = text_input(
+        console,
+        "Web UI -- IP Allowlist",
+        "Allowed IPs/CIDRs",
+        hint=(
+            "Enter comma-separated CIDRs or IPs to restrict access.\n"
+            "  Example: 192.168.1.0/24, 10.0.0.0/8\n"
+            "\n"
+            "  Press Enter with empty input to allow all IPs"
+        ),
+        allow_empty=True,
+        subtitle="Step 6 of 9 -- Web UI",
+    )
+
+    if allowed_ips is None:
+        return None
+
+    return (password, allowed_ips)
 
 
 def voice_transcription_screen(console: Console) -> tuple[str, str] | None:
@@ -164,7 +207,7 @@ def voice_transcription_screen(console: Console) -> tuple[str, str] | None:
         console,
         "Voice transcription provider",
         voice_providers,
-        subtitle="Step 6 of 8 — Optional",
+        subtitle="Step 7 of 9 — Optional",
     )
     if idx is None:
         return None
@@ -180,7 +223,7 @@ def voice_transcription_screen(console: Console) -> tuple[str, str] | None:
         "API key",
         hint="Paste your API key and press Enter",
         secret=False,
-        subtitle=f"Step 6 of 8 — {provider_label}",
+        subtitle=f"Step 7 of 9 — {provider_label}",
     )
     if api_key is None:
         return None
@@ -202,7 +245,7 @@ def web_search_screen(console: Console) -> tuple[str, str] | None:
         console,
         "Web search engine",
         engines,
-        subtitle="Step 7 of 8 — Optional",
+        subtitle="Step 8 of 9 — Optional",
     )
     if idx is None:
         return None
@@ -222,7 +265,7 @@ def web_search_screen(console: Console) -> tuple[str, str] | None:
             "  Press Enter with empty input to skip"
         ),
         allow_empty=True,
-        subtitle="Step 7 of 8 — Brave Search",
+        subtitle="Step 8 of 9 — Brave Search",
     )
     if api_key is None:
         return None
@@ -245,7 +288,7 @@ def daemon_screen(console: Console) -> int | None:
                 "You can run the gateway manually with:",
                 "  [cyan]ragnarbot gateway[/cyan]",
             ],
-            subtitle="Step 7 of 8",
+            subtitle="Step 8 of 9",
         )
         return 1  # "no" — continue without daemon
 
@@ -258,7 +301,7 @@ def daemon_screen(console: Console) -> int | None:
         console,
         "Enable auto-start?",
         options,
-        subtitle="Step 7 of 8",
+        subtitle="Step 8 of 9",
     )
 
 
@@ -271,6 +314,7 @@ def summary_screen(
     enable_daemon: bool = False,
     voice_provider: str = "none",
     search_engine: str = "none",
+    web_ui_configured: bool = False,
 ) -> bool:
     """Show summary of configured values. Returns True on Enter."""
     voice_label = {"groq": "Groq", "elevenlabs": "ElevenLabs", "none": "Skipped"}
@@ -282,6 +326,7 @@ def summary_screen(
         f"  Auth:           [cyan]{auth_method}[/cyan]",
         f"  Model:          [cyan]{model_name}[/cyan]",
         f"  Telegram:       [cyan]{'Enabled' if telegram_configured else 'Skipped'}[/cyan]",
+        f"  Web UI:         [cyan]{'Enabled' if web_ui_configured else 'Skipped'}[/cyan]",
         f"  Transcription:  [cyan]{voice_label.get(voice_provider, voice_provider)}[/cyan]",
         f"  Web search:     [cyan]{search_label.get(search_engine, search_engine)}[/cyan]",
         f"  Auto-start:     [cyan]{'Enabled' if enable_daemon else 'Manual'}[/cyan]",

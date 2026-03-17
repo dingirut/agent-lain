@@ -1,0 +1,3263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lain</title>
+<link rel="icon" type="image/png" href="/static/favicon.png">
+<script src="/static/marked.min.js"></script>
+<style>
+:root {
+  --bg-primary: #0f1117;
+  --bg-secondary: #1a1d27;
+  --bg-tertiary: #252833;
+  --bg-input: #1e2130;
+  --text-primary: #e4e7ef;
+  --text-secondary: #9da3b4;
+  --text-muted: #6b7280;
+  --accent: #34d399;
+  --accent-dim: #34d39933;
+  --border: #2d3148;
+  --red: #f87171;
+  --blue: #60a5fa;
+  --yellow: #fbbf24;
+  --radius: 8px;
+  --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: var(--font);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* ── Auth Screen ─────────────────────────────── */
+
+#auth-screen {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  background: var(--bg-primary);
+}
+
+.auth-box {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 40px;
+  width: 360px;
+  text-align: center;
+}
+
+.auth-box h1 {
+  font-size: 24px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: var(--accent);
+}
+
+.auth-box p {
+  color: var(--text-secondary);
+  font-size: 14px;
+  margin-bottom: 24px;
+}
+
+.auth-box input {
+  width: 100%;
+  padding: 12px 16px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font-size: 14px;
+  outline: none;
+  margin-bottom: 16px;
+}
+
+.auth-box input:focus { border-color: var(--accent); }
+
+.auth-box button {
+  width: 100%;
+  padding: 12px;
+  background: var(--accent);
+  color: var(--bg-primary);
+  border: none;
+  border-radius: var(--radius);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.auth-box button:hover { opacity: 0.9; }
+
+.auth-error {
+  color: var(--red);
+  font-size: 13px;
+  margin-bottom: 12px;
+  display: none;
+}
+
+/* ── Main Layout ─────────────────────────────── */
+
+#main-app { display: none; height: 100vh; flex-direction: column; }
+
+.top-bar {
+  display: flex;
+  align-items: center;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  padding: 0 16px;
+  height: 48px;
+  flex-shrink: 0;
+}
+
+.top-bar .logo {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--accent);
+  margin-right: 24px;
+}
+
+.tabs {
+  display: flex;
+  gap: 2px;
+  flex: 1;
+}
+
+.tab {
+  padding: 12px 16px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all 0.15s;
+}
+
+.tab:hover { color: var(--text-primary); }
+.tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+.logout-btn {
+  padding: 6px 12px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.logout-btn:hover { border-color: var(--red); color: var(--red); }
+
+.tab-content { flex: 1; overflow: auto; display: none; min-height: 0; }
+.tab-content.active { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+
+/* ── Chat Tab ────────────────────────────────── */
+
+.chat-container { display: flex; flex: 1; overflow: hidden; }
+
+.chat-sidebar {
+  width: 240px;
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
+.sidebar-header {
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.new-chat-btn {
+  width: 100%;
+  padding: 8px;
+  background: var(--accent-dim);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  color: var(--accent);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.new-chat-btn:hover { background: var(--accent); color: var(--bg-primary); }
+
+.session-list { flex: 1; overflow-y: auto; padding: 8px; }
+
+.session-item {
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 2px;
+  display: flex;
+  align-items: center;
+  position: relative;
+}
+.session-item .session-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-item .session-edit-btn {
+  opacity: 0; border: none; background: none; cursor: pointer;
+  color: var(--text-muted); font-size: 13px; padding: 2px 4px; margin-left: 4px;
+  transition: opacity .15s;
+}
+.session-item:hover .session-edit-btn { opacity: .7; }
+.session-item .session-edit-btn:hover { opacity: 1; color: var(--accent); }
+
+.session-item:hover { background: var(--bg-tertiary); }
+.session-item.active { background: var(--accent-dim); color: var(--accent); }
+
+.session-rename-input {
+  flex: 1; background: var(--bg-secondary); border: 1px solid var(--accent);
+  color: var(--text-primary); border-radius: 4px; padding: 2px 6px;
+  font-size: 13px; outline: none;
+}
+
+.chat-main { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
+
+/* ── Preview Panel ───────────────────────────── */
+
+#preview-panel {
+  display: none;
+  width: 50%;
+  min-width: 320px;
+  max-width: 70%;
+  border-left: 1px solid var(--border);
+  flex-direction: column;
+  flex-shrink: 0;
+  background: var(--bg-secondary);
+}
+
+#preview-panel.active { display: flex; }
+
+.preview-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-tertiary);
+  flex-shrink: 0;
+}
+
+.preview-toolbar .preview-title {
+  flex: 1;
+  font-size: 13px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.preview-toolbar button {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  padding: 4px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.preview-toolbar button:hover { border-color: var(--accent); color: var(--accent); }
+
+#preview-iframe {
+  flex: 1;
+  border: none;
+  background: #fff;
+  border-radius: 0 0 0 0;
+}
+
+.preview-resize {
+  width: 4px;
+  cursor: col-resize;
+  background: transparent;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.preview-resize:hover, .preview-resize.dragging { background: var(--accent); }
+
+.messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  scroll-behavior: smooth;
+}
+
+.message {
+  margin-bottom: 16px;
+  max-width: 85%;
+  animation: fadeIn 0.2s;
+}
+
+@keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+.message.user {
+  margin-left: auto;
+  width: fit-content;
+  background: var(--accent-dim);
+  border: 1px solid var(--accent);
+  border-radius: 12px 12px 4px 12px;
+  padding: 10px 14px;
+}
+.message.user img { max-width: 300px; border-radius: 8px; display: block; }
+
+.message.assistant {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 12px 12px 12px 4px;
+  padding: 10px 14px;
+  padding-left: 48px;
+  position: relative;
+}
+.message.assistant::before {
+  content: '';
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: url('/static/lain_circle.png') center/cover no-repeat;
+}
+
+.message.system {
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 12px;
+  max-width: 100%;
+  padding: 4px;
+}
+
+.message-content { font-size: 14px; line-height: 1.6; word-wrap: break-word; }
+.message-content p { margin-bottom: 8px; }
+.message-content p:last-child { margin-bottom: 0; }
+.message-content code { font-family: var(--mono); background: var(--bg-tertiary); padding: 2px 6px; border-radius: 4px; font-size: 13px; }
+.message-content pre { background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; margin: 8px 0; overflow-x: auto; }
+.message-content pre code { background: none; padding: 0; font-size: 13px; }
+.message-content ul, .message-content ol { padding-left: 20px; margin: 8px 0; }
+.message-content a { color: var(--accent); text-decoration: none; }
+.message-content a:hover { text-decoration: underline; }
+.message-content img { max-width: 100%; border-radius: var(--radius); margin: 8px 0; }
+.message-content blockquote { border-left: 3px solid var(--accent); padding-left: 12px; color: var(--text-secondary); margin: 8px 0; }
+.message-content table { border-collapse: collapse; margin: 8px 0; width: 100%; }
+.message-content th, .message-content td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; font-size: 13px; }
+.message-content th { background: var(--bg-tertiary); }
+.message-content img { cursor: pointer; transition: opacity .15s; }
+.message-content img:hover { opacity: .85; }
+.artifact-link {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 4px 10px; background: var(--accent-dim); border: 1px solid var(--accent);
+  border-radius: 6px; font-size: 13px; text-decoration: none; color: var(--accent);
+  transition: all .15s;
+}
+.artifact-link:hover { background: var(--accent); color: var(--bg-primary); text-decoration: none; }
+
+/* Lightbox */
+.lightbox {
+  display: none; position: fixed; inset: 0; z-index: 9999;
+  background: rgba(0,0,0,0.85); backdrop-filter: blur(4px);
+  align-items: center; justify-content: center; cursor: zoom-out;
+}
+.lightbox.active { display: flex; }
+#lightbox-content { pointer-events: none; display: flex; align-items: center; justify-content: center; }
+#lightbox-content img, #lightbox-content video { pointer-events: auto; }
+.lightbox img {
+  max-width: 92vw; max-height: 92vh; border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5); object-fit: contain;
+  animation: lbFadeIn .2s ease;
+}
+.lightbox video {
+  max-width: 92vw; max-height: 92vh; border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  animation: lbFadeIn .2s ease;
+}
+@keyframes lbFadeIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: none; } }
+.lightbox-close {
+  position: fixed; top: 16px; right: 16px; z-index: 10000;
+  background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.2);
+  color: #fff; font-size: 24px; width: 40px; height: 40px;
+  border-radius: 50%; cursor: pointer; display: flex;
+  align-items: center; justify-content: center; transition: background .15s;
+}
+.lightbox-close:hover { background: rgba(255,255,255,0.2); }
+
+.inline-keyboard { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.inline-keyboard button {
+  padding: 6px 12px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+}
+.inline-keyboard button:hover { border-color: var(--accent); color: var(--accent); }
+
+.typing-indicator {
+  display: none;
+  padding: 8px 16px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.typing-indicator.active { display: flex; align-items: center; gap: 8px; }
+
+.typing-dots { display: flex; gap: 4px; }
+.typing-dots span {
+  width: 6px; height: 6px;
+  background: var(--text-muted);
+  border-radius: 50%;
+  animation: bounce 1.4s infinite;
+}
+.typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+.typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes bounce {
+  0%, 60%, 100% { transform: translateY(0); }
+  30% { transform: translateY(-6px); }
+}
+
+.chat-input-area {
+  padding: 12px 16px;
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border);
+}
+
+.attach-preview {
+  display: flex;
+  gap: 8px;
+  padding: 8px 0;
+  flex-wrap: wrap;
+}
+.attach-preview-items { display: flex; gap: 8px; flex-wrap: wrap; }
+.attach-thumb {
+  position: relative;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  overflow: hidden;
+  display: inline-block;
+}
+.attach-thumb img { display: block; max-height: 80px; max-width: 120px; object-fit: cover; }
+.attach-thumb .attach-file-name {
+  display: block; padding: 6px 10px; font-size: 12px; color: var(--text-secondary);
+  background: var(--bg-tertiary); max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.attach-thumb .attach-remove {
+  position: absolute; top: 2px; right: 2px;
+  background: rgba(0,0,0,0.6); color: #fff; border: none; cursor: pointer;
+  border-radius: 50%; width: 18px; height: 18px; font-size: 12px; line-height: 18px;
+  text-align: center; padding: 0;
+}
+.attach-thumb .attach-remove:hover { background: var(--red); }
+
+.command-bar {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.cmd-btn {
+  padding: 4px 10px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-family: var(--mono);
+  cursor: pointer;
+}
+
+.cmd-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+.input-row { display: flex; gap: 8px; align-items: flex-end; }
+
+.file-btn, .voice-btn {
+  width: 38px; height: 38px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-secondary);
+  font-size: 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.file-btn:hover, .voice-btn:hover { border-color: var(--accent); color: var(--accent); }
+.voice-btn.recording { border-color: var(--red); color: var(--red); animation: pulse 1s infinite; }
+
+@keyframes pulse { 50% { opacity: 0.5; } }
+
+#chat-input {
+  flex: 1;
+  padding: 10px 14px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font-size: 14px;
+  font-family: var(--font);
+  resize: none;
+  outline: none;
+  min-height: 38px;
+  max-height: 150px;
+}
+
+#chat-input:focus { border-color: var(--accent); }
+
+.send-btn {
+  width: 38px; height: 38px;
+  background: var(--accent);
+  border: none;
+  border-radius: var(--radius);
+  color: var(--bg-primary);
+  font-size: 18px;
+  cursor: pointer;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.send-btn:hover { opacity: 0.9; }
+
+/* ── Dashboard Tabs (shared) ─────────────────── */
+
+.dashboard {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+}
+
+.dash-header { font-size: 18px; font-weight: 600; margin-bottom: 16px; }
+
+.dash-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.dash-table th {
+  text-align: left;
+  padding: 10px 12px;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border);
+  font-weight: 500;
+}
+
+.dash-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.dash-table tr:hover { background: var(--bg-secondary); }
+
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.badge.running { background: var(--blue); color: #fff; }
+.badge.completed { background: var(--accent); color: var(--bg-primary); }
+.badge.error { background: var(--red); color: #fff; }
+.badge.pending { background: var(--yellow); color: var(--bg-primary); }
+
+.dash-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.dash-card h3 { font-size: 14px; color: var(--text-secondary); margin-bottom: 8px; }
+
+.dash-empty {
+  text-align: center;
+  color: var(--text-muted);
+  padding: 40px;
+  font-size: 14px;
+}
+
+/* ── Memory Tab ──────────────────────────────── */
+
+.memory-subtabs {
+  display: flex;
+  gap: 0;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.memory-subtab {
+  padding: 8px 20px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all 0.15s;
+}
+.memory-subtab:hover { color: var(--text-primary); background: var(--bg-tertiary); }
+.memory-subtab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.memory-subcontent { display: none; flex: 1; min-height: 0; overflow: hidden; }
+.memory-subcontent.active { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+
+/* Knowledge Graph */
+.graph-container { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.graph-toolbar {
+  padding: 8px 16px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+.graph-toolbar input {
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 13px;
+  width: 240px;
+}
+.graph-toolbar .graph-stats { color: var(--text-secondary); margin-left: auto; }
+.graph-canvas-wrap { flex: 1; position: relative; overflow: hidden; }
+.graph-canvas-wrap canvas { width: 100%; height: 100%; display: block; }
+.graph-tooltip {
+  position: absolute;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--text-primary);
+  pointer-events: none;
+  display: none;
+  z-index: 10;
+  max-width: 300px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+.graph-legend {
+  padding: 8px 16px;
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border);
+  display: flex;
+  gap: 16px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+.graph-legend-item { display: flex; align-items: center; gap: 4px; }
+.graph-legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+
+/* Facts table */
+.facts-container { flex: 1; overflow-y: auto; padding: 16px; }
+.facts-search {
+  display: flex; gap: 8px; margin-bottom: 12px;
+}
+.facts-search input {
+  flex: 1;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-size: 13px;
+}
+.facts-search button {
+  padding: 6px 16px;
+  background: var(--accent);
+  color: #000;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.fact-card {
+  padding: 10px 14px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+.fact-card .fact-triple { color: var(--text-primary); font-weight: 500; }
+.fact-card .fact-meta { color: var(--text-secondary); font-size: 11px; margin-top: 4px; }
+.fact-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+/* Memory Debug */
+.debug-layout { display: flex; flex: 1; gap: 0; min-height: 0; overflow: hidden; }
+.debug-input-panel {
+  width: 380px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border);
+  background: var(--bg-secondary);
+  min-height: 0;
+  overflow-y: auto;
+}
+.debug-input-panel .debug-header {
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.debug-input-panel textarea {
+  flex: 1;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: none;
+  padding: 12px;
+  font-size: 13px;
+  font-family: 'JetBrains Mono', monospace;
+  resize: none;
+  outline: none;
+  line-height: 1.5;
+}
+.debug-actions {
+  padding: 10px 14px;
+  display: flex;
+  gap: 8px;
+  border-top: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.debug-actions button {
+  padding: 6px 14px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+}
+.debug-btn-run { background: var(--accent); color: #000; }
+.debug-btn-run:hover { filter: brightness(1.1); }
+.debug-btn-run:disabled { opacity: 0.5; cursor: not-allowed; }
+.debug-btn-store { background: #4caf50; color: #000; }
+.debug-btn-store:hover { filter: brightness(1.1); }
+.debug-btn-store:disabled { opacity: 0.5; cursor: not-allowed; }
+.debug-btn-secondary { background: var(--bg-tertiary); color: var(--text-secondary); border: 1px solid var(--border) !important; }
+.debug-btn-secondary:hover { color: var(--text-primary); }
+.debug-upload-zone {
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.debug-upload-zone:hover, .debug-upload-zone.drag-over {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+.debug-pipeline-panel {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px;
+  min-height: 0;
+}
+.debug-pipeline-panel > * + * { margin-top: 10px; }
+.debug-stage {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.debug-stage-header {
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  user-select: none;
+}
+.debug-stage-header:hover { background: var(--bg-tertiary); }
+.debug-stage-header .arrow { font-size: 10px; transition: transform 0.15s; }
+.debug-stage.open .debug-stage-header .arrow { transform: rotate(90deg); }
+.debug-stage-body { display: none; padding: 10px 14px; border-top: 1px solid var(--border); }
+.debug-stage.open .debug-stage-body { display: block; }
+.debug-stage-count {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 400;
+  padding: 1px 8px;
+  border-radius: 10px;
+}
+.debug-count-green { background: rgba(76,175,80,0.15); color: #4caf50; }
+.debug-count-red { background: rgba(244,67,54,0.15); color: #f44336; }
+.debug-count-yellow { background: rgba(255,183,77,0.15); color: #ffb74d; }
+.debug-count-blue { background: rgba(79,195,247,0.15); color: #4fc3f7; }
+.debug-fact-row {
+  padding: 6px 10px;
+  margin: 4px 0;
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: 'JetBrains Mono', monospace;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.debug-fact-row.passed { background: rgba(76,175,80,0.08); border-left: 3px solid #4caf50; }
+.debug-fact-row.rejected { background: rgba(244,67,54,0.08); border-left: 3px solid #f44336; }
+.debug-fact-row.warning { background: rgba(255,183,77,0.08); border-left: 3px solid #ffb74d; }
+.debug-fact-row.info { background: rgba(79,195,247,0.08); border-left: 3px solid #4fc3f7; }
+.debug-fact-triple { color: var(--text-primary); }
+.debug-fact-reason { color: var(--text-secondary); font-size: 11px; margin-top: 2px; }
+.debug-icon { font-size: 14px; flex-shrink: 0; margin-top: 1px; }
+.debug-editable-section {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+.debug-editable-section label {
+  display: block;
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+  font-weight: 500;
+}
+.debug-editable-section textarea {
+  width: 100%;
+  min-height: 120px;
+  max-height: 600px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 8px;
+  font-size: 12px;
+  font-family: 'JetBrains Mono', monospace;
+  resize: vertical;
+  outline: none;
+  box-sizing: border-box;
+}
+.debug-editable-section textarea:focus { border-color: var(--accent); }
+.debug-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+.debug-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.debug-chip .remove-chip {
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1;
+}
+.debug-chip .remove-chip:hover { color: #f44336; }
+.debug-chip-add {
+  background: none;
+  border: 1px dashed var(--border);
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+}
+.debug-chip-add:hover { border-color: var(--accent); color: var(--accent); }
+.debug-spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.6s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.debug-empty {
+  text-align: center;
+  color: var(--text-secondary);
+  padding: 40px 20px;
+  font-size: 13px;
+}
+
+.memory-layout { display: flex; flex: 1; overflow: hidden; }
+
+.file-tree {
+  width: 260px;
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  padding: 8px;
+  flex-shrink: 0;
+}
+
+.tree-item {
+  padding: 4px 8px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-secondary);
+  border-radius: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tree-item:hover { background: var(--bg-tertiary); }
+.tree-item.active { color: var(--accent); background: var(--accent-dim); }
+.tree-dir { font-weight: 500; color: var(--text-primary); }
+.tree-indent { display: inline-block; width: 16px; flex-shrink: 0; }
+.tree-children { overflow: hidden; display: none; }
+.tree-children.expanded { display: block; }
+.tree-toggle { font-size: 10px; width: 14px; text-align: center; flex-shrink: 0; transition: transform 0.15s; display: inline-block; transform: rotate(-90deg); }
+.tree-toggle.expanded { transform: rotate(0deg); }
+.tree-file-name { overflow: hidden; text-overflow: ellipsis; flex: 1; }
+.tree-open-btn {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  font-size: 10px;
+  background: var(--accent-dim);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+  margin-left: auto;
+}
+.tree-item:hover .tree-open-btn { opacity: 1; }
+
+.file-editor {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.editor-header {
+  padding: 8px 16px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.editor-btn {
+  padding: 4px 12px;
+  border: none;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.editor-btn-primary {
+  background: var(--accent);
+  color: var(--bg-primary);
+}
+.editor-btn-secondary {
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+}
+.editor-btn-secondary:hover { color: var(--text-primary); border-color: var(--text-secondary); }
+.editor-btn.saved {
+  background: #22c55e;
+  color: #fff;
+  pointer-events: none;
+}
+.editor-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-left: auto;
+}
+
+#file-content {
+  flex: 1;
+  width: 100%;
+  padding: 16px;
+  background: var(--bg-primary);
+  border: none;
+  color: var(--text-primary);
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.5;
+  resize: none;
+  outline: none;
+}
+
+#file-preview-frame {
+  flex: 1;
+  width: 100%;
+  height: 0;
+  min-height: 0;
+  border: none;
+  background: #fff;
+  display: none;
+}
+
+.editor-btn-danger {
+  background: transparent;
+  color: #ef4444;
+  border: 1px solid #ef4444;
+}
+.editor-btn-danger:hover { background: #ef4444; color: #fff; }
+
+/* ── Logs Tab ────────────────────────────────── */
+
+.logs-toolbar {
+  padding: 8px 16px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.log-filter {
+  padding: 4px 10px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.log-filter.active { border-color: var(--accent); color: var(--accent); }
+
+.log-viewer {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 16px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.log-entry { white-space: pre-wrap; word-break: break-all; }
+.log-DEBUG { color: var(--text-muted); }
+.log-INFO { color: var(--text-primary); }
+.log-WARNING { color: var(--yellow); }
+.log-ERROR { color: var(--red); }
+
+/* ── Responsive ──────────────────────────────── */
+
+@media (max-width: 768px) {
+  .chat-sidebar { display: none; }
+  .file-tree { width: 180px; }
+  .tab { padding: 10px 10px; font-size: 12px; }
+  .top-bar .logo { margin-right: 12px; }
+  #preview-panel.active { position: absolute; inset: 0; width: 100% !important; max-width: 100% !important; z-index: 100; }
+  .preview-resize { display: none; }
+}
+</style>
+</head>
+<body>
+
+<!-- Auth Screen -->
+<div id="auth-screen">
+  <div class="auth-box">
+    <img src="/static/lain_circle.png" style="width:64px;height:64px;margin-bottom:12px;">
+    <h1>Lain</h1>
+    <p>Enter your password to continue</p>
+    <div class="auth-error" id="auth-error"></div>
+    <input type="password" id="auth-password" placeholder="Password" autofocus>
+    <button onclick="doLogin()">Sign In</button>
+  </div>
+</div>
+
+<!-- Main App -->
+<div id="main-app">
+  <div class="top-bar">
+    <span class="logo"><img src="/static/lain_circle.png" style="width:24px;height:24px;vertical-align:middle;margin-right:6px;">Lain</span>
+    <div class="tabs">
+      <div class="tab active" data-tab="chat">Chat</div>
+      <div class="tab" data-tab="memory">Memory</div>
+      <div class="tab" data-tab="jobs">Jobs</div>
+      <div class="tab" data-tab="routines">Routines</div>
+      <div class="tab" data-tab="extensions">Extensions</div>
+      <div class="tab" data-tab="skills">Skills</div>
+      <div class="tab" data-tab="logs">Logs</div>
+    </div>
+    <button class="logout-btn" onclick="doLogout()">Logout</button>
+  </div>
+
+  <!-- Chat -->
+  <div class="tab-content active" id="tab-chat">
+    <div class="chat-container">
+      <div class="chat-sidebar">
+        <div class="sidebar-header">
+          <button class="new-chat-btn" onclick="newChat()">+ New Chat</button>
+        </div>
+        <div class="session-list" id="session-list"></div>
+      </div>
+      <div class="chat-main">
+        <div class="messages" id="messages"></div>
+        <div class="typing-indicator" id="typing">
+          <div class="typing-dots"><span></span><span></span><span></span></div>
+          <span>Thinking...</span>
+        </div>
+        <div class="chat-input-area">
+          <div class="command-bar">
+            <button class="cmd-btn" onclick="sendCommand('new')">/new</button>
+            <button class="cmd-btn" onclick="sendCommand('context')">/context</button>
+            <button class="cmd-btn" onclick="sendCommand('context_mode')">/context_mode</button>
+            <button class="cmd-btn" onclick="sendCommand('trace')">/trace</button>
+            <button class="cmd-btn" onclick="sendCommand('compact')">/compact</button>
+            <button class="cmd-btn" onclick="sendCommand('stop')">/stop</button>
+          </div>
+          <div class="attach-preview" id="attach-preview" style="display:none;">
+            <div class="attach-preview-items" id="attach-preview-items"></div>
+          </div>
+          <div class="input-row">
+            <button class="file-btn" onclick="attachFile()" title="Attach file">&#128206;</button>
+            <button class="voice-btn" id="voice-btn" onmousedown="startRecording()" onmouseup="stopRecording()" title="Hold to record">&#127908;</button>
+            <textarea id="chat-input" rows="1" placeholder="Send a message..." onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
+            <button class="send-btn" onclick="sendMessage()">&#10148;</button>
+          </div>
+        </div>
+        <input type="file" id="file-input" style="display:none" onchange="handleFileSelect(event)" multiple>
+      </div>
+      <!-- Preview Panel -->
+      <div class="preview-resize" id="preview-resize"></div>
+      <div id="preview-panel">
+        <div class="preview-toolbar">
+          <span class="preview-title" id="preview-title">Preview</span>
+          <button onclick="refreshPreview()" title="Refresh">&#8635;</button>
+          <button onclick="openPreviewNewTab()" title="Open in new tab">&#8599;</button>
+          <button onclick="closePreview()" title="Close">&times;</button>
+        </div>
+        <iframe id="preview-iframe" sandbox="allow-scripts allow-same-origin allow-forms"></iframe>
+      </div>
+    </div>
+  </div>
+
+  <!-- Memory -->
+  <div class="tab-content" id="tab-memory">
+    <div class="memory-subtabs">
+      <div class="memory-subtab active" data-subtab="files" onclick="switchMemoryTab('files')">Files</div>
+      <div class="memory-subtab" data-subtab="graph" onclick="switchMemoryTab('graph')">Knowledge Graph</div>
+      <div class="memory-subtab" data-subtab="facts" onclick="switchMemoryTab('facts')">Facts</div>
+      <div class="memory-subtab" data-subtab="debug" onclick="switchMemoryTab('debug')">Debug</div>
+    </div>
+
+    <!-- Files sub-tab (existing) -->
+    <div class="memory-subcontent active" id="memory-files">
+      <div class="memory-layout">
+        <div class="file-tree" id="file-tree"></div>
+        <div class="file-editor">
+          <div class="editor-header">
+            <span id="editor-path">Select a file</span>
+            <div class="editor-actions">
+              <button class="editor-btn editor-btn-secondary" id="btn-preview" onclick="togglePreview()" style="display:none" title="Preview rendered HTML">Preview</button>
+              <button class="editor-btn editor-btn-secondary" id="btn-open" onclick="openCurrentFile()" style="display:none" title="Open in new tab">Open ↗</button>
+              <button class="editor-btn editor-btn-primary" id="btn-save" onclick="saveFile()">Save</button>
+              <button class="editor-btn editor-btn-danger" id="btn-delete" onclick="deleteFile()" style="display:none" title="Delete file">Delete</button>
+            </div>
+          </div>
+          <textarea id="file-content" placeholder="Select a file to view/edit..."></textarea>
+          <iframe id="file-preview-frame"></iframe>
+        </div>
+      </div>
+    </div>
+
+    <!-- Knowledge Graph sub-tab -->
+    <div class="memory-subcontent" id="memory-graph">
+      <div class="graph-container">
+        <div class="graph-toolbar">
+          <input type="text" id="graph-filter" placeholder="Filter entities..." oninput="filterGraph(this.value)">
+          <span class="graph-stats" id="graph-stats"></span>
+        </div>
+        <div class="graph-canvas-wrap" id="graph-wrap">
+          <canvas id="graph-canvas"></canvas>
+          <div class="graph-tooltip" id="graph-tooltip"></div>
+        </div>
+        <div class="graph-legend" id="graph-legend"></div>
+      </div>
+    </div>
+
+    <!-- Facts sub-tab -->
+    <div class="memory-subcontent" id="memory-facts">
+      <div class="facts-container">
+        <div class="facts-search">
+          <input type="text" id="facts-query" placeholder="Search facts..." onkeydown="if(event.key==='Enter')searchFacts()">
+          <button onclick="searchFacts()">Search</button>
+        </div>
+        <div id="facts-list"></div>
+      </div>
+    </div>
+
+    <!-- Debug sub-tab -->
+    <div class="memory-subcontent" id="memory-debug">
+      <div class="debug-layout">
+        <div class="debug-input-panel">
+          <div class="debug-header">Input Text</div>
+          <textarea id="debug-input" placeholder="Paste conversation text here or upload a file..."></textarea>
+          <div class="debug-upload-zone" id="debug-upload-zone"
+               ondragover="event.preventDefault();this.classList.add('drag-over')"
+               ondragleave="this.classList.remove('drag-over')"
+               ondrop="handleDebugFileDrop(event)">
+            Drop file here or <label style="color:var(--accent);cursor:pointer">click to upload<input type="file" id="debug-file-input" accept=".md,.txt,.csv,.json,.log,.rst" style="display:none" onchange="handleDebugFileSelect(event)"></label>
+          </div>
+          <div class="debug-actions">
+            <button class="debug-btn-run" id="debug-run-btn" onclick="runDebugPipeline(false)">Run Pipeline</button>
+            <button class="debug-btn-store" id="debug-store-btn" onclick="runDebugPipeline(true)" disabled>Run &amp; Store</button>
+            <button class="debug-btn-secondary" onclick="resetDebugOverrides()">Reset Defaults</button>
+            <button class="debug-btn-secondary" style="color:#f44336;border-color:#f44336 !important;margin-left:auto" onclick="purgeMemory()">Purge All</button>
+          </div>
+        </div>
+        <div class="debug-pipeline-panel" id="debug-pipeline">
+          <div class="debug-empty" id="debug-placeholder">
+            Enter text and click "Run Pipeline" to see how facts pass through the extraction and validation stages.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Jobs -->
+  <div class="tab-content" id="tab-jobs">
+    <div class="dashboard">
+      <h2 class="dash-header">Jobs</h2>
+      <div id="jobs-content"></div>
+    </div>
+  </div>
+
+  <!-- Routines -->
+  <div class="tab-content" id="tab-routines">
+    <div class="dashboard">
+      <h2 class="dash-header">Routines</h2>
+      <div id="routines-content"></div>
+    </div>
+  </div>
+
+  <!-- Extensions -->
+  <div class="tab-content" id="tab-extensions">
+    <div class="dashboard">
+      <h2 class="dash-header">Extensions</h2>
+      <div id="extensions-content"></div>
+    </div>
+  </div>
+
+  <!-- Skills -->
+  <div class="tab-content" id="tab-skills">
+    <div class="dashboard">
+      <h2 class="dash-header">Skills</h2>
+      <div id="skills-content"></div>
+    </div>
+  </div>
+
+  <!-- Logs -->
+  <div class="tab-content" id="tab-logs">
+    <div class="logs-toolbar">
+      <button class="log-filter active" data-level="all" onclick="setLogFilter('all', this)">All</button>
+      <button class="log-filter" data-level="DEBUG" onclick="setLogFilter('DEBUG', this)">Debug</button>
+      <button class="log-filter" data-level="INFO" onclick="setLogFilter('INFO', this)">Info</button>
+      <button class="log-filter" data-level="WARNING" onclick="setLogFilter('WARNING', this)">Warning</button>
+      <button class="log-filter" data-level="ERROR" onclick="setLogFilter('ERROR', this)">Error</button>
+      <label style="margin-left:auto;font-size:12px;color:var(--text-secondary)">
+        <input type="checkbox" id="log-autoscroll" checked> Auto-scroll
+      </label>
+    </div>
+    <div class="log-viewer" id="log-viewer"></div>
+  </div>
+</div>
+
+<div class="lightbox" id="lightbox">
+  <button class="lightbox-close" onclick="closeLightbox()">&times;</button>
+  <div id="lightbox-content"></div>
+</div>
+
+<script>
+// ── State ──────────────────────────────────────
+let ws = null;
+let wsReconnectDelay = 1000;
+let currentTab = 'chat';
+let currentFilePath = '';
+let logFilter = 'all';
+let logEvtSource = null;
+let mediaRecorder = null;
+let audioChunks = [];
+let pollTimers = {};
+
+// ── Markdown ───────────────────────────────────
+if (typeof marked !== 'undefined') {
+  marked.setOptions({
+    breaks: true,
+    gfm: true,
+    highlight: null,
+  });
+}
+
+function renderMd(text) {
+  if (!text) return '';
+  // Convert [file available: /path/to/image] to inline images
+  text = text.replace(/\[file available: ([^\]]+)\]/g, (match, fpath) => {
+    if (/\.(png|jpe?g|gif|webp|svg)$/i.test(fpath)) {
+      // Extract relative path after /media/
+      const rel = fpath.replace(/^.*?\/\.ragnarbot\/media\//, '').replace(/^.*?\/ragnarbot\/media\//, '');
+      return '![image](/api/media/' + encodeURI(rel) + ')';
+    }
+    // Non-image file — show as link
+    const name = fpath.split('/').pop();
+    const rel = fpath.replace(/^.*?\/\.ragnarbot\/media\//, '');
+    return '[📎 ' + name + '](/api/media/' + encodeURI(rel) + ')';
+  });
+  // Remove [photo saved: ...] markers
+  text = text.replace(/\[photo saved: [^\]]+\]\n?/g, '');
+  try {
+    let html = marked.parse(text);
+    // Convert links to workspace .html files into preview buttons
+    html = html.replace(/<a href="(\/api\/artifacts\/[^"]+\.html)"([^>]*)>([^<]*)<\/a>/g,
+      '<a href="$1" onclick="event.preventDefault();openPreview(\'$1\',\'$3\')" class="artifact-link" $2>📄 $3</a>');
+    return html;
+  } catch(e) { return escapeHtml(text); }
+}
+
+function escapeHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── Auth ───────────────────────────────────────
+async function checkAuth() {
+  try {
+    const r = await fetch('/api/auth/check');
+    if (r.ok) { showApp(); return; }
+  } catch(e) {}
+  showAuth();
+}
+
+async function doLogin() {
+  const pw = document.getElementById('auth-password').value;
+  const errEl = document.getElementById('auth-error');
+  try {
+    const r = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({password: pw}),
+    });
+    if (r.ok) { showApp(); }
+    else { errEl.textContent = 'Invalid password'; errEl.style.display = 'block'; }
+  } catch(e) {
+    errEl.textContent = 'Connection error'; errEl.style.display = 'block';
+  }
+}
+
+async function doLogout() {
+  await fetch('/api/auth/logout', {method: 'POST'});
+  if (ws) ws.close();
+  showAuth();
+}
+
+function showAuth() {
+  document.getElementById('auth-screen').style.display = 'flex';
+  document.getElementById('main-app').style.display = 'none';
+}
+
+function showApp() {
+  document.getElementById('auth-screen').style.display = 'none';
+  document.getElementById('main-app').style.display = 'flex';
+  connectWS();
+  loadSessions();
+}
+
+document.getElementById('auth-password').addEventListener('keydown', e => {
+  if (e.key === 'Enter') doLogin();
+});
+
+// ── Tabs ───────────────────────────────────────
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    const name = tab.dataset.tab;
+    document.getElementById('tab-' + name).classList.add('active');
+    currentTab = name;
+    onTabSwitch(name);
+  });
+});
+
+function onTabSwitch(name) {
+  // Clear old timers
+  Object.values(pollTimers).forEach(clearInterval);
+  pollTimers = {};
+
+  if (name === 'jobs') { loadJobs(); pollTimers.jobs = setInterval(loadJobs, 5000); }
+  if (name === 'routines') loadRoutines();
+  if (name === 'extensions') loadExtensions();
+  if (name === 'memory') { loadMemoryTree(); loadGraphIfActive(); loadFactsIfActive(); }
+  if (name === 'skills') loadSkills();
+  if (name === 'logs') startLogStream();
+}
+
+// ── WebSocket ──────────────────────────────────
+function connectWS() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(proto + '//' + location.host + '/ws');
+
+  ws.onopen = () => { wsReconnectDelay = 1000; };
+
+  ws.onmessage = (e) => {
+    try { handleWSMessage(JSON.parse(e.data)); } catch(err) { console.error('WS parse error', err); }
+  };
+
+  ws.onclose = (ev) => {
+    console.warn('[ws] closed, code:', ev.code, 'reason:', ev.reason);
+    setTimeout(() => {
+      wsReconnectDelay = Math.min(wsReconnectDelay * 2, 30000);
+      connectWS();
+    }, wsReconnectDelay);
+  };
+
+  ws.onerror = (err) => { console.error('[ws] error:', err); };
+}
+
+function handleWSMessage(msg) {
+  switch(msg.type) {
+    case 'message': addMessage(msg); break;
+    case 'typing': setTyping(msg.active); break;
+    case 'history': loadHistory(msg.messages); break;
+    case 'media': addMedia(msg); break;
+    case 'inline_keyboard': addKeyboard(msg); break;
+    case 'edit': editMessage(msg); break;
+    case 'reaction': addReaction(msg); break;
+    case 'preview': openPreview(msg.url, msg.title); break;
+    case 'error': addSystemMessage(msg.message); break;
+  }
+}
+
+// ── Chat Messages ──────────────────────────────
+function addMessage(msg) {
+  const el = document.createElement('div');
+  el.className = 'message ' + (msg.role || 'assistant');
+  el.dataset.msgId = msg.id || '';
+  el.innerHTML = '<div class="message-content">' + renderMd(msg.content) + '</div>';
+  document.getElementById('messages').appendChild(el);
+  scrollToBottom();
+}
+
+function loadHistory(messages) {
+  const container = document.getElementById('messages');
+  container.innerHTML = '';
+  messages.forEach(m => addMessage(m));
+  scrollToBottom();
+}
+
+function addSystemMessage(text) {
+  const el = document.createElement('div');
+  el.className = 'message system';
+  el.innerHTML = '<div class="message-content">' + escapeHtml(text) + '</div>';
+  document.getElementById('messages').appendChild(el);
+  scrollToBottom();
+}
+
+function addMedia(msg) {
+  const el = document.createElement('div');
+  el.className = 'message assistant';
+  let html = '';
+  if (msg.media_type === 'photo') html = '<div class="message-content"><img src="' + msg.url + '" alt="photo"></div>';
+  else if (msg.media_type === 'video') html = '<div class="message-content"><video controls src="' + msg.url + '"></video></div>';
+  else html = '<a href="' + msg.url + '" target="_blank">Download file</a>';
+  if (msg.caption) html += '<div class="message-content">' + renderMd(msg.caption) + '</div>';
+  el.innerHTML = html;
+  document.getElementById('messages').appendChild(el);
+  scrollToBottom();
+}
+
+function addKeyboard(msg) {
+  // Find the message or add content + buttons
+  const el = document.createElement('div');
+  el.className = 'message assistant';
+  el.dataset.msgId = msg.message_id || '';
+  let html = '';
+  if (msg.content) html += '<div class="message-content">' + renderMd(msg.content) + '</div>';
+  html += '<div class="inline-keyboard">';
+  (msg.buttons || []).forEach(row => {
+    (Array.isArray(row) ? row : [row]).forEach(btn => {
+      html += '<button onclick="sendKeyboardCallback(\'' + escapeHtml(btn.callback_data || btn.data || '') + '\')">' + escapeHtml(btn.text) + '</button>';
+    });
+  });
+  html += '</div>';
+  el.innerHTML = html;
+  document.getElementById('messages').appendChild(el);
+  scrollToBottom();
+}
+
+function editMessage(msg) {
+  const el = document.querySelector('[data-msg-id="' + msg.message_id + '"]');
+  if (el) {
+    el.querySelector('.message-content').innerHTML = renderMd(msg.content);
+  }
+}
+
+function addReaction(msg) {
+  const el = document.querySelector('[data-msg-id="' + msg.message_id + '"]');
+  if (el) {
+    let badge = el.querySelector('.reaction-badge');
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.className = 'reaction-badge';
+      badge.style.cssText = 'display:inline-block;margin-top:4px;font-size:18px;';
+      el.appendChild(badge);
+    }
+    badge.textContent = msg.emoji;
+  }
+}
+
+function setTyping(active) {
+  document.getElementById('typing').classList.toggle('active', active);
+  if (active) scrollToBottom();
+}
+
+function scrollToBottom() {
+  const el = document.getElementById('messages');
+  el.scrollTop = el.scrollHeight;
+}
+
+// ── Chat Input ─────────────────────────────────
+function sendMessage() {
+  const input = document.getElementById('chat-input');
+  const text = input.value.trim();
+  const hasFiles = pendingFiles.length > 0;
+  if (!text && !hasFiles) return;
+  if (!ws || ws.readyState !== 1) return;
+
+  // Build preview content for user message
+  let preview = '';
+  if (hasFiles) {
+    pendingFiles.forEach(pf => {
+      if (pf.file.type.startsWith('image/')) {
+        preview += '<img src="' + pf.dataUrl + '" style="max-width:300px;max-height:200px;border-radius:8px;margin:4px 0;display:block;">';
+      } else {
+        preview += '<div style="font-size:12px;color:var(--text-muted);">📎 ' + escapeHtml(pf.file.name) + '</div>';
+      }
+    });
+  }
+  if (text) preview += (preview ? '<div style="margin-top:4px;">' : '<div>') + renderMd(text) + '</div>';
+
+  // Show user message with attachments immediately
+  const el = document.createElement('div');
+  el.className = 'message user';
+  el.dataset.msgId = 'u_' + Date.now();
+  el.innerHTML = '<div class="message-content">' + preview + '</div>';
+  document.getElementById('messages').appendChild(el);
+  scrollToBottom();
+
+  // Send files first, then text
+  if (hasFiles) {
+    sendPendingFiles(text);
+  } else {
+    ws.send(JSON.stringify({type: 'message', content: text}));
+  }
+
+  // If we sent files with caption, don't send text separately
+  // If no files, text was sent as message above
+  // If files + text, caption was sent with first file
+  if (hasFiles && text) {
+    // caption already sent with files, no separate message needed
+  } else if (!hasFiles) {
+    // text already sent above
+  }
+
+  input.value = '';
+  autoResize(input);
+}
+
+function handleKey(e) {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendMessage();
+  }
+}
+
+function autoResize(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 150) + 'px';
+}
+
+function sendCommand(name, value) {
+  if (!ws || ws.readyState !== 1) return;
+  ws.send(JSON.stringify({type: 'command', name: name, value: value || ''}));
+}
+
+function sendKeyboardCallback(data) {
+  if (!ws || ws.readyState !== 1) return;
+  ws.send(JSON.stringify({type: 'keyboard_callback', data: data}));
+}
+
+// ── File Attach ────────────────────────────────
+function attachFile() { document.getElementById('file-input').click(); }
+
+// ── Attachment staging ──────────────────────────
+let pendingFiles = []; // [{file, b64, dataUrl}]
+
+function stageFile(file) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    const dataUrl = reader.result;
+    const b64 = dataUrl.split(',')[1];
+    pendingFiles.push({file, b64, dataUrl});
+    renderAttachPreview();
+  };
+  reader.readAsDataURL(file);
+}
+
+function removeAttachment(idx) {
+  pendingFiles.splice(idx, 1);
+  renderAttachPreview();
+}
+
+function renderAttachPreview() {
+  const container = document.getElementById('attach-preview');
+  const items = document.getElementById('attach-preview-items');
+  if (!pendingFiles.length) { container.style.display = 'none'; items.innerHTML = ''; return; }
+  container.style.display = 'flex';
+  items.innerHTML = '';
+  pendingFiles.forEach((pf, idx) => {
+    const thumb = document.createElement('div');
+    thumb.className = 'attach-thumb';
+    if (pf.file.type.startsWith('image/')) {
+      thumb.innerHTML = '<img src="' + pf.dataUrl + '">';
+    } else {
+      thumb.innerHTML = '<span class="attach-file-name">' + escapeHtml(pf.file.name) + '</span>';
+    }
+    thumb.innerHTML += '<button class="attach-remove" onclick="removeAttachment(' + idx + ')">&times;</button>';
+    items.appendChild(thumb);
+  });
+  document.getElementById('chat-input').focus();
+}
+
+function sendPendingFiles(caption) {
+  if (!ws || ws.readyState !== 1) return;
+  pendingFiles.forEach((pf, i) => {
+    ws.send(JSON.stringify({
+      type: 'file', data: pf.b64, filename: pf.file.name,
+      mime: pf.file.type, caption: i === 0 ? (caption || '') : ''
+    }));
+  });
+  pendingFiles = [];
+  renderAttachPreview();
+}
+
+function handleFileSelect(e) {
+  const files = e.target.files;
+  for (const file of files) stageFile(file);
+  e.target.value = '';
+}
+
+// Clipboard paste (Ctrl+V screenshots)
+document.addEventListener('paste', e => {
+  if (currentTab !== 'chat') return;
+  const items = e.clipboardData && e.clipboardData.items;
+  if (!items) return;
+  for (const item of items) {
+    if (item.type.startsWith('image/')) {
+      e.preventDefault();
+      const file = item.getAsFile();
+      if (!file) continue;
+      const fname = 'clipboard_' + Date.now() + '.' + (file.type.split('/')[1] || 'png');
+      stageFile(new File([file], fname, {type: file.type}));
+      break;
+    }
+  }
+});
+
+// Drag and drop
+document.addEventListener('dragover', e => e.preventDefault());
+document.addEventListener('drop', e => {
+  e.preventDefault();
+  if (currentTab !== 'chat') return;
+  for (const file of e.dataTransfer.files) stageFile(file);
+});
+
+// ── Voice Recording ────────────────────────────
+async function startRecording() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({audio: true});
+    mediaRecorder = new MediaRecorder(stream, {mimeType: 'audio/webm'});
+    audioChunks = [];
+    mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+    mediaRecorder.start();
+    document.getElementById('voice-btn').classList.add('recording');
+  } catch(e) { console.error('Mic error:', e); }
+}
+
+function stopRecording() {
+  if (!mediaRecorder || mediaRecorder.state !== 'recording') return;
+  document.getElementById('voice-btn').classList.remove('recording');
+  mediaRecorder.onstop = () => {
+    const blob = new Blob(audioChunks, {type: 'audio/webm'});
+    const reader = new FileReader();
+    reader.onload = () => {
+      const b64 = reader.result.split(',')[1];
+      if (ws && ws.readyState === 1) {
+        ws.send(JSON.stringify({type: 'voice', data: b64, mime: 'audio/webm'}));
+        addSystemMessage('Voice message sent');
+      }
+    };
+    reader.readAsDataURL(blob);
+    mediaRecorder.stream.getTracks().forEach(t => t.stop());
+  };
+  mediaRecorder.stop();
+}
+
+// ── Sessions ───────────────────────────────────
+let currentSessionId = null;
+
+async function loadSessions() {
+  try {
+    const r = await fetch('/api/sessions');
+    if (!r.ok) return;
+    const data = await r.json();
+    const sessions = data.sessions || [];
+    const activeId = data.active_session_id || null;
+    if (activeId && !currentSessionId) currentSessionId = activeId;
+
+    const list = document.getElementById('session-list');
+    list.innerHTML = '';
+    sessions.slice(0, 50).forEach(s => {
+      const el = document.createElement('div');
+      const isActive = s.session_id === currentSessionId;
+      el.className = 'session-item' + (isActive ? ' active' : '');
+
+      const label = document.createElement('span');
+      label.className = 'session-label';
+      const title = s.title || '';
+      if (title) {
+        label.textContent = title;
+      } else {
+        const date = s.updated_at ? new Date(s.updated_at).toLocaleDateString() : '';
+        const time = s.updated_at ? new Date(s.updated_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : '';
+        label.textContent = date + ' ' + time + '  ' + (s.session_id || '').slice(-6);
+      }
+      label.onclick = () => switchSession(s.session_id);
+
+      const editBtn = document.createElement('button');
+      editBtn.className = 'session-edit-btn';
+      editBtn.innerHTML = '&#9998;';
+      editBtn.title = 'Rename';
+      editBtn.onclick = (e) => { e.stopPropagation(); startRename(el, s.session_id, label.textContent); };
+
+      const delBtn = document.createElement('button');
+      delBtn.className = 'session-edit-btn';
+      delBtn.innerHTML = '&times;';
+      delBtn.title = 'Delete';
+      delBtn.style.fontSize = '16px';
+      delBtn.onclick = (e) => { e.stopPropagation(); deleteSession(s.session_id, isActive); };
+
+      el.appendChild(label);
+      el.appendChild(editBtn);
+      el.appendChild(delBtn);
+      list.appendChild(el);
+    });
+  } catch(e) {}
+}
+
+function startRename(el, sessionId, currentTitle) {
+  el.innerHTML = '';
+  const input = document.createElement('input');
+  input.className = 'session-rename-input';
+  input.value = currentTitle;
+  input.maxLength = 60;
+  el.appendChild(input);
+  input.focus();
+  input.select();
+
+  const finish = async () => {
+    const newTitle = input.value.trim();
+    if (newTitle && newTitle !== currentTitle) {
+      await fetch('/api/sessions/rename', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({session_id: sessionId, title: newTitle}),
+      });
+    }
+    await loadSessions();
+  };
+
+  input.onblur = finish;
+  input.onkeydown = (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+    if (e.key === 'Escape') { e.preventDefault(); loadSessions(); }
+  };
+}
+
+async function deleteSession(id, isActive) {
+  if (isActive) { alert('Cannot delete the active session. Switch to another one first.'); return; }
+  if (!confirm('Delete this session?')) return;
+  try {
+    const r = await fetch('/api/sessions/' + encodeURIComponent(id), {method: 'DELETE'});
+    if (!r.ok) { const d = await r.json().catch(()=>({})); alert(d.error || 'Failed to delete'); return; }
+    await loadSessions();
+  } catch(e) { console.error('deleteSession error:', e); }
+}
+
+async function newChat() {
+  try {
+    const r = await fetch('/api/sessions/new', {method: 'POST'});
+    if (!r.ok) return;
+    const data = await r.json();
+    currentSessionId = data.session_id;
+    // Clear chat display
+    document.getElementById('messages').innerHTML = '';
+    // Reload session list to show the new one as active
+    await loadSessions();
+    // Tell WS to reload history (will be empty for new session)
+    sendCommand('switch_session');
+  } catch(e) { console.error('newChat error:', e); }
+}
+
+async function switchSession(id) {
+  if (id === currentSessionId) return;
+  try {
+    const r = await fetch('/api/sessions/switch', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({session_id: id}),
+    });
+    if (!r.ok) return;
+    currentSessionId = id;
+    // Clear chat display
+    document.getElementById('messages').innerHTML = '';
+    // Reload session list to highlight the active one
+    await loadSessions();
+    // Ask server to send history for the new active session
+    sendCommand('switch_session');
+  } catch(e) { console.error('switchSession error:', e); }
+}
+
+// ── Jobs Tab ───────────────────────────────────
+async function loadJobs() {
+  try {
+    const r = await fetch('/api/jobs');
+    if (!r.ok) return;
+    const jobs = await r.json();
+    const el = document.getElementById('jobs-content');
+    if (!jobs.length) { el.innerHTML = '<div class="dash-empty">No active jobs</div>'; return; }
+    let html = '<table class="dash-table"><tr><th>ID</th><th>Label</th><th>Type</th><th>Status</th></tr>';
+    jobs.forEach(j => {
+      const badge = j.status === 'running' ? 'running' : j.status === 'completed' ? 'completed' : j.status === 'error' ? 'error' : 'pending';
+      html += '<tr><td>' + escapeHtml(j.id) + '</td><td>' + escapeHtml(j.label) + '</td><td>' + escapeHtml(j.type) + '</td><td><span class="badge ' + badge + '">' + escapeHtml(j.status) + '</span></td></tr>';
+    });
+    html += '</table>';
+    el.innerHTML = html;
+  } catch(e) {}
+}
+
+// ── Routines Tab ───────────────────────────────
+async function loadRoutines() {
+  try {
+    const r = await fetch('/api/routines');
+    if (!r.ok) return;
+    const data = await r.json();
+    const el = document.getElementById('routines-content');
+    let html = '';
+
+    if (data.heartbeat) {
+      html += '<div class="dash-card"><h3>Heartbeat</h3><p>Enabled: ' + data.heartbeat.enabled + ' | Running: ' + data.heartbeat.running + '</p></div>';
+    }
+
+    const jobs = data.cron_jobs || [];
+    if (!jobs.length) { html += '<div class="dash-empty">No cron jobs</div>'; }
+    else {
+      html += '<table class="dash-table"><tr><th>Name</th><th>Schedule</th><th>Mode</th><th>Actions</th></tr>';
+      jobs.forEach(j => {
+        html += '<tr><td>' + escapeHtml(j.name || '') + '</td><td>' + escapeHtml(JSON.stringify(j.schedule || {})) + '</td><td>' + escapeHtml((j.payload||{}).mode || '') + '</td><td><button class="cmd-btn" onclick="runRoutine(\'' + j.id + '\')">Run</button> <button class="cmd-btn" onclick="deleteRoutine(\'' + j.id + '\')">Delete</button></td></tr>';
+      });
+      html += '</table>';
+    }
+    el.innerHTML = html;
+  } catch(e) {}
+}
+
+async function runRoutine(id) {
+  await fetch('/api/routines/' + id + '/run', {method: 'POST'});
+  loadRoutines();
+}
+
+async function deleteRoutine(id) {
+  if (!confirm('Delete this routine?')) return;
+  await fetch('/api/routines/' + id, {method: 'DELETE'});
+  loadRoutines();
+}
+
+// ── Extensions Tab ─────────────────────────────
+async function loadExtensions() {
+  try {
+    const r = await fetch('/api/extensions');
+    if (!r.ok) return;
+    const exts = await r.json();
+    const el = document.getElementById('extensions-content');
+    if (!exts.length) { el.innerHTML = '<div class="dash-empty">No extensions</div>'; return; }
+    let html = '<table class="dash-table"><tr><th>Name</th><th>Description</th></tr>';
+    exts.forEach(e => {
+      html += '<tr><td><code>' + escapeHtml(e.name) + '</code></td><td>' + escapeHtml(e.description || '').slice(0, 120) + '</td></tr>';
+    });
+    html += '</table>';
+    el.innerHTML = html;
+  } catch(e) {}
+}
+
+// ── Memory Tab ─────────────────────────────────
+async function loadMemoryTree() {
+  try {
+    const r = await fetch('/api/memory/tree');
+    if (!r.ok) return;
+    const tree = await r.json();
+    const el = document.getElementById('file-tree');
+    el.innerHTML = renderTree(tree, 0);
+  } catch(e) {}
+}
+
+var treeIdCounter = 0;
+function renderTree(items, depth) {
+  let html = '';
+  items.forEach(item => {
+    const indent = '<span class="tree-indent"></span>'.repeat(depth);
+    if (item.type === 'directory') {
+      const id = 'tree-dir-' + (treeIdCounter++);
+      html += '<div class="tree-item tree-dir" onclick="toggleDir(\'' + id + '\', this)">'
+        + indent
+        + '<span class="tree-toggle" id="toggle-' + id + '">▼</span>'
+        + '<span class="tree-file-name">📁 ' + escapeHtml(item.name) + '</span>'
+        + '</div>';
+      html += '<div class="tree-children" id="' + id + '">';
+      if (item.children) html += renderTree(item.children, depth + 1);
+      html += '</div>';
+    } else {
+      const isHtml = item.name.toLowerCase().endsWith('.html') || item.name.toLowerCase().endsWith('.htm');
+      const openBtn = isHtml
+        ? '<button class="tree-open-btn" onclick="event.stopPropagation(); openHtmlFile(\'' + escapeHtml(item.path) + '\')" title="Open in browser">Open</button>'
+        : '';
+      html += '<div class="tree-item" onclick="loadFile(\'' + escapeHtml(item.path) + '\')">'
+        + indent
+        + '<span class="tree-file-name">📄 ' + escapeHtml(item.name) + '</span>'
+        + openBtn
+        + '</div>';
+    }
+  });
+  return html;
+}
+
+function toggleDir(id, el) {
+  const children = document.getElementById(id);
+  const toggle = document.getElementById('toggle-' + id);
+  if (!children) return;
+  children.classList.toggle('expanded');
+  if (toggle) toggle.classList.toggle('expanded');
+}
+
+function openHtmlFile(path) {
+  window.open('/api/artifacts/' + encodeURI(path), '_blank');
+}
+
+var isPreviewMode = false;
+
+function isHtmlPath(path) {
+  return /\.(html?|htm)$/i.test(path || '');
+}
+
+function updateEditorButtons() {
+  const html = isHtmlPath(currentFilePath);
+  document.getElementById('btn-preview').style.display = html ? '' : 'none';
+  document.getElementById('btn-open').style.display = html ? '' : 'none';
+  document.getElementById('btn-delete').style.display = currentFilePath ? '' : 'none';
+  // Reset preview mode when switching files
+  if (isPreviewMode) exitPreview();
+}
+
+async function loadFile(path) {
+  try {
+    const r = await fetch('/api/memory/read?path=' + encodeURIComponent(path));
+    if (!r.ok) return;
+    const data = await r.json();
+    document.getElementById('editor-path').textContent = path;
+    document.getElementById('file-content').value = data.content || '';
+    // Highlight active file in tree
+    document.querySelectorAll('.tree-item.active').forEach(el => el.classList.remove('active'));
+    const items = document.querySelectorAll('.tree-item');
+    items.forEach(el => {
+      if (el.getAttribute('onclick') && el.getAttribute('onclick').includes(path)) el.classList.add('active');
+    });
+    currentFilePath = path;
+    updateEditorButtons();
+  } catch(e) {}
+}
+
+async function saveFile() {
+  if (!currentFilePath) return;
+  const btn = document.getElementById('btn-save');
+  try {
+    const r = await fetch('/api/memory/write', {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({path: currentFilePath, content: document.getElementById('file-content').value}),
+    });
+    if (r.ok) {
+      btn.textContent = 'Saved ✓';
+      btn.classList.add('saved');
+      setTimeout(() => { btn.textContent = 'Save'; btn.classList.remove('saved'); }, 2000);
+      // If preview is active, refresh it
+      if (isPreviewMode) showPreview();
+    }
+  } catch(e) {}
+}
+
+function togglePreview() {
+  if (isPreviewMode) {
+    exitPreview();
+  } else {
+    showPreview();
+  }
+}
+
+function showPreview() {
+  const textarea = document.getElementById('file-content');
+  const iframe = document.getElementById('file-preview-frame');
+  const btn = document.getElementById('btn-preview');
+  textarea.style.display = 'none';
+  iframe.style.display = 'block';
+  if (currentFilePath) {
+    iframe.src = '/api/artifacts/' + encodeURI(currentFilePath);
+  }
+  btn.textContent = 'Source';
+  btn.title = 'Show source code';
+  isPreviewMode = true;
+}
+
+function exitPreview() {
+  const textarea = document.getElementById('file-content');
+  const iframe = document.getElementById('file-preview-frame');
+  const btn = document.getElementById('btn-preview');
+  iframe.style.display = 'none';
+  iframe.src = 'about:blank';
+  textarea.style.display = 'block';
+  btn.textContent = 'Preview';
+  btn.title = 'Preview rendered HTML';
+  isPreviewMode = false;
+}
+
+function openCurrentFile() {
+  if (!currentFilePath) return;
+  window.open('/api/artifacts/' + encodeURI(currentFilePath), '_blank');
+}
+
+async function deleteFile() {
+  if (!currentFilePath) return;
+  if (!confirm('Delete ' + currentFilePath + '?')) return;
+  try {
+    const r = await fetch('/api/memory/delete', {
+      method: 'DELETE',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({path: currentFilePath}),
+    });
+    if (r.ok) {
+      document.getElementById('editor-path').textContent = 'Select a file';
+      document.getElementById('file-content').value = '';
+      currentFilePath = null;
+      updateEditorButtons();
+      document.getElementById('btn-delete').style.display = 'none';
+      loadMemoryTree();
+    }
+  } catch(e) {}
+}
+
+// ── Memory Sub-tabs ───────────────────────────
+var currentMemoryTab = 'files';
+
+function switchMemoryTab(name) {
+  currentMemoryTab = name;
+  document.querySelectorAll('.memory-subtab').forEach(t => t.classList.toggle('active', t.dataset.subtab === name));
+  document.querySelectorAll('.memory-subcontent').forEach(t => t.classList.remove('active'));
+  document.getElementById('memory-' + name).classList.add('active');
+  if (name === 'graph') loadGraph();
+  if (name === 'facts') loadFacts();
+  if (name === 'debug') initDebugTab();
+}
+
+function loadGraphIfActive() { if (currentMemoryTab === 'graph') loadGraph(); }
+function loadFactsIfActive() { if (currentMemoryTab === 'facts') loadFacts(); }
+
+// ── Knowledge Graph ───────────────────────────
+var graphData = {nodes: [], edges: []};
+var graphSim = null;
+var graphDrag = null;
+var graphTransform = {x: 0, y: 0, scale: 1};
+var graphFilter = '';
+
+const NODE_COLORS = {
+  person: '#4fc3f7',
+  project: '#81c784',
+  tool: '#ffb74d',
+  technology: '#ba68c8',
+  organization: '#e57373',
+  location: '#fff176',
+  concept: '#90a4ae',
+  other: '#78909c',
+};
+
+async function loadGraph() {
+  try {
+    const r = await fetch('/api/memory/graph');
+    if (!r.ok) return;
+    const data = await r.json();
+    if (data.status !== 'ok') {
+      document.getElementById('graph-stats').textContent = 'Graph: ' + data.status;
+      return;
+    }
+    graphData = data;
+    document.getElementById('graph-stats').textContent =
+      data.nodes.length + ' entities, ' + data.edges.length + ' relations' +
+      (data.fact_count ? ', ' + data.fact_count + ' facts' : '');
+    renderLegend();
+    initGraphCanvas();
+  } catch(e) {
+    document.getElementById('graph-stats').textContent = 'Error loading graph';
+  }
+}
+
+function renderLegend() {
+  const types = new Set(graphData.nodes.map(n => n.type || 'other'));
+  const el = document.getElementById('graph-legend');
+  el.innerHTML = Array.from(types).sort().map(t =>
+    '<div class="graph-legend-item"><span class="graph-legend-dot" style="background:' +
+    (NODE_COLORS[t] || NODE_COLORS.other) + '"></span>' + t + '</div>'
+  ).join('');
+}
+
+function initGraphCanvas() {
+  const wrap = document.getElementById('graph-wrap');
+  const canvas = document.getElementById('graph-canvas');
+  const ctx = canvas.getContext('2d');
+
+  const rect = wrap.getBoundingClientRect();
+  canvas.width = rect.width * devicePixelRatio;
+  canvas.height = rect.height * devicePixelRatio;
+  canvas.style.width = rect.width + 'px';
+  canvas.style.height = rect.height + 'px';
+  ctx.scale(devicePixelRatio, devicePixelRatio);
+
+  const W = rect.width, H = rect.height;
+  const N = graphData.nodes.length;
+
+  // Circular initial layout — spread nodes evenly in a large circle
+  const cx = W / 2, cy = H / 2;
+  const radius = Math.min(W, H) * 0.4;
+  const nodes = graphData.nodes.map((n, i) => ({
+    ...n,
+    x: cx + radius * Math.cos(2 * Math.PI * i / N) + (Math.random() - 0.5) * 40,
+    y: cy + radius * Math.sin(2 * Math.PI * i / N) + (Math.random() - 0.5) * 40,
+    vx: 0, vy: 0,
+    visible: true,
+    degree: 0,
+  }));
+  const nodeMap = {};
+  nodes.forEach(n => nodeMap[n.id] = n);
+
+  const edges = graphData.edges.filter(e => nodeMap[e.source] && nodeMap[e.target]);
+
+  // Compute node degrees for sizing
+  edges.forEach(e => {
+    if (nodeMap[e.source]) nodeMap[e.source].degree++;
+    if (nodeMap[e.target]) nodeMap[e.target].degree++;
+  });
+
+  graphTransform = {x: 0, y: 0, scale: 1};
+
+  // ── Simulation state (d3-force style alpha decay) ──
+  let alpha = 1.0;
+  const alphaMin = 0.001;
+  const alphaDecay = 0.0228;  // ~300 ticks to stabilize
+  const velocityDecay = 0.6;
+  let simRunning = true;
+  let rafId = null;
+  let dirty = false;  // for post-sim render-on-demand
+
+  const tooltip = document.getElementById('graph-tooltip');
+  let hoverNode = null;
+
+  // Ideal spacing
+  const idealDist = Math.max(80, Math.sqrt(W * H / Math.max(N, 1)) * 1.2);
+
+  // ── Pre-rendered glow textures (replaces expensive shadowBlur) ──
+  const glowCache = new Map();
+  function getGlowTexture(radius, color, glowRadius) {
+    const key = Math.round(radius) + '-' + color + '-' + Math.round(glowRadius);
+    if (glowCache.has(key)) return glowCache.get(key);
+    const size = Math.ceil((radius + glowRadius) * 2 + 4);
+    const off = document.createElement('canvas');
+    off.width = size; off.height = size;
+    const c = off.getContext('2d');
+    const cx2 = size / 2, cy2 = size / 2;
+    // Glow: radial gradient (fast, no blur)
+    const grad = c.createRadialGradient(cx2, cy2, radius * 0.5, cx2, cy2, radius + glowRadius);
+    grad.addColorStop(0, color);
+    grad.addColorStop(0.6, color.replace(')', ',0.3)').replace('rgb(', 'rgba('));
+    grad.addColorStop(1, 'rgba(0,0,0,0)');
+    c.fillStyle = grad;
+    c.beginPath();
+    c.arc(cx2, cy2, radius + glowRadius, 0, Math.PI * 2);
+    c.fill();
+    // Solid core
+    c.fillStyle = color;
+    c.beginPath();
+    c.arc(cx2, cy2, radius, 0, Math.PI * 2);
+    c.fill();
+    // Border ring
+    c.strokeStyle = 'rgba(255,255,255,0.45)';
+    c.lineWidth = 1.2;
+    c.stroke();
+    glowCache.set(key, off);
+    return off;
+  }
+
+  // ── Precompute neighbor sets for O(1) lookup ──
+  const neighborSet = new Map();
+  nodes.forEach(n => neighborSet.set(n.id, new Set()));
+  edges.forEach(e => {
+    if (neighborSet.has(e.source)) neighborSet.get(e.source).add(e.target);
+    if (neighborSet.has(e.target)) neighborSet.get(e.target).add(e.source);
+  });
+
+  function applyFilter(filter) {
+    const f = filter.toLowerCase();
+    nodes.forEach(n => {
+      n.visible = !f || n.label.toLowerCase().includes(f) ||
+        (n.aliases || []).some(a => a.toLowerCase().includes(f)) ||
+        (n.type || '').includes(f);
+    });
+    markDirty();
+  }
+  window._graphApplyFilter = applyFilter;
+
+  // ── Physics tick with alpha decay ──
+  function tick() {
+    alpha += (0 - alpha) * alphaDecay;
+    if (alpha < alphaMin) {
+      simRunning = false;
+      return;
+    }
+
+    // Reset forces
+    nodes.forEach(n => { n.fx = 0; n.fy = 0; });
+
+    // Repulsion (Coulomb) — all pairs
+    for (let i = 0; i < N; i++) {
+      for (let j = i + 1; j < N; j++) {
+        const a = nodes[i], b = nodes[j];
+        let dx = a.x - b.x, dy = a.y - b.y;
+        let dist = Math.sqrt(dx * dx + dy * dy) || 0.1;
+        let force = idealDist * idealDist / dist;
+        let ux = (dx / dist) * force, uy = (dy / dist) * force;
+        a.fx += ux; a.fy += uy;
+        b.fx -= ux; b.fy -= uy;
+      }
+    }
+
+    // Attraction (Hooke) — connected pairs
+    edges.forEach(e => {
+      const s = nodeMap[e.source], t = nodeMap[e.target];
+      if (!s || !t) return;
+      let dx = t.x - s.x, dy = t.y - s.y;
+      let dist = Math.sqrt(dx * dx + dy * dy) || 0.1;
+      let force = (dist - idealDist * 0.6) * 0.05;
+      let ux = (dx / dist) * force, uy = (dy / dist) * force;
+      s.fx += ux; s.fy += uy;
+      t.fx -= ux; t.fy -= uy;
+    });
+
+    // Center gravity
+    nodes.forEach(n => {
+      n.fx += (cx - n.x) * 0.002;
+      n.fy += (cy - n.y) * 0.002;
+    });
+
+    // Apply forces with alpha scaling + velocity decay
+    nodes.forEach(n => {
+      n.vx = (n.vx + n.fx * alpha) * velocityDecay;
+      n.vy = (n.vy + n.fy * alpha) * velocityDecay;
+      n.x += n.vx;
+      n.y += n.vy;
+    });
+  }
+
+  function nodeRadius(n) {
+    const base = Math.max(6, Math.min(20, 5 + n.degree * 2));
+    const zc = Math.max(1, 1.2 / Math.max(graphTransform.scale, 0.05));
+    return base * Math.min(zc, 4);
+  }
+
+  // ── Draw (optimized: batch edges, pre-rendered glow, no shadowBlur) ──
+  function draw() {
+    ctx.save();
+    ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+
+    ctx.save();
+    ctx.translate(graphTransform.x, graphTransform.y);
+    ctx.scale(graphTransform.scale, graphTransform.scale);
+
+    const sc = graphTransform.scale;
+    const edgeZoomComp = Math.max(1, 1.2 / Math.max(sc, 0.1));
+
+    // ── Batch edges by style for fewer state changes ──
+    // 1) Normal edges (single batched path)
+    ctx.beginPath();
+    ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+    ctx.lineWidth = Math.min(1.5 * edgeZoomComp, 6);
+    const highlightEdges = [];
+    const dimEdges = [];
+    edges.forEach(e => {
+      const s = nodeMap[e.source], t = nodeMap[e.target];
+      if (!s || !t) return;
+      const bothVisible = s.visible && t.visible;
+      if (!bothVisible && !s.visible && !t.visible) return;
+      const isHL = hoverNode && (e.source === hoverNode.id || e.target === hoverNode.id);
+      if (isHL) { highlightEdges.push(e); return; }
+      if (!bothVisible) { dimEdges.push(e); return; }
+      ctx.moveTo(s.x, s.y);
+      ctx.lineTo(t.x, t.y);
+    });
+    ctx.stroke();
+
+    // 2) Dim edges (batch)
+    if (dimEdges.length) {
+      ctx.beginPath();
+      ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+      ctx.lineWidth = Math.min(1 * edgeZoomComp, 4);
+      dimEdges.forEach(e => {
+        const s = nodeMap[e.source], t = nodeMap[e.target];
+        ctx.moveTo(s.x, s.y);
+        ctx.lineTo(t.x, t.y);
+      });
+      ctx.stroke();
+    }
+
+    // 3) Highlighted edges (drawn last, on top)
+    highlightEdges.forEach(e => {
+      const s = nodeMap[e.source], t = nodeMap[e.target];
+      if (!s || !t) return;
+      ctx.beginPath();
+      ctx.moveTo(s.x, s.y);
+      ctx.lineTo(t.x, t.y);
+      ctx.strokeStyle = 'rgba(0,230,118,0.9)';
+      ctx.lineWidth = 3 * edgeZoomComp;
+      ctx.stroke();
+      if (e.label && sc > 0.4) {
+        const mx = (s.x + t.x) / 2, my = (s.y + t.y) / 2;
+        ctx.fillStyle = 'rgba(0,230,118,0.95)';
+        ctx.font = 'bold ' + (11 / Math.max(sc, 0.4)) + 'px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(e.label, mx, my - 5);
+      }
+    });
+
+    // ── Nodes (pre-rendered glow textures — no shadowBlur) ──
+    nodes.forEach(n => {
+      if (!n.visible && !hoverNode) return;
+      const color = NODE_COLORS[n.type] || NODE_COLORS.other;
+      const r = nodeRadius(n);
+      const isHover = hoverNode && hoverNode.id === n.id;
+      const isNeighbor = hoverNode && neighborSet.has(n.id) && neighborSet.get(hoverNode.id)?.has(n.id);
+
+      let nodeAlpha = n.visible ? 1 : 0.15;
+      if (hoverNode) {
+        nodeAlpha = isHover ? 1 : isNeighbor ? 0.95 : 0.2;
+      }
+
+      ctx.globalAlpha = nodeAlpha;
+      const drawR = isHover ? r + 4 : r;
+      const glowR = isHover ? r * 1.2 : r * 0.7;
+      const tex = getGlowTexture(Math.round(drawR), color, Math.round(glowR));
+      ctx.drawImage(tex, n.x - tex.width / 2, n.y - tex.height / 2);
+
+      // Extra highlight ring on hover
+      if (isHover) {
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 2.5 / Math.max(sc, 0.3);
+        ctx.beginPath();
+        ctx.arc(n.x, n.y, drawR + 2, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+
+      // Labels
+      const showLabel = isHover || isNeighbor || (n.visible && sc > 1.0) || (n.visible && n.degree >= 3 && sc > 0.5);
+      if (showLabel) {
+        const fontSize = Math.max(10, Math.min(14, 12 / Math.max(sc, 0.4)));
+        ctx.fillStyle = isHover ? '#fff' : isNeighbor ? 'rgba(255,255,255,0.95)' : 'rgba(255,255,255,0.8)';
+        ctx.font = (isHover ? 'bold ' : '') + fontSize + 'px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(n.label, n.x, n.y - drawR - 5);
+      }
+    });
+
+    ctx.restore();
+    ctx.restore();
+  }
+
+  // ── Render-on-demand after simulation stops ──
+  function markDirty() {
+    if (dirty) return;
+    dirty = true;
+    requestAnimationFrame(() => { draw(); dirty = false; });
+  }
+
+  // ── Simulation loop — stops when alpha < alphaMin ──
+  function simLoop() {
+    if (!simRunning) {
+      draw();  // final frame
+      rafId = null;
+      return;
+    }
+    tick();
+    draw();
+    rafId = requestAnimationFrame(simLoop);
+  }
+
+  // Reheat simulation (for node drag)
+  function reheat(a) {
+    alpha = a || 0.3;
+    if (!simRunning) {
+      simRunning = true;
+      simLoop();
+    }
+  }
+
+  // ── Mouse interactions ──
+  let isDragging = false, dragNode = null, lastMouse = null;
+  let dragRafId = null;
+
+  function mouseToGraph(e) {
+    return {
+      x: (e.offsetX - graphTransform.x) / graphTransform.scale,
+      y: (e.offsetY - graphTransform.y) / graphTransform.scale,
+    };
+  }
+
+  function findNode(gx, gy) {
+    let closest = null, minD = 25 / graphTransform.scale;
+    nodes.forEach(n => {
+      const d = Math.sqrt((n.x - gx) ** 2 + (n.y - gy) ** 2);
+      if (d < minD) { minD = d; closest = n; }
+    });
+    return closest;
+  }
+
+  canvas.onmousedown = (e) => {
+    const g = mouseToGraph(e);
+    const hit = findNode(g.x, g.y);
+    if (hit) {
+      dragNode = hit;
+      graphDrag = true;
+      reheat(0.15);  // gentle reheat on node drag
+    } else {
+      isDragging = true;
+      lastMouse = {x: e.offsetX, y: e.offsetY};
+    }
+  };
+
+  canvas.onmousemove = (e) => {
+    if (dragNode) {
+      const g = mouseToGraph(e);
+      dragNode.x = g.x; dragNode.y = g.y;
+      dragNode.vx = 0; dragNode.vy = 0;
+      // Coalesce drag renders to 1 per frame
+      if (!simRunning && !dragRafId) {
+        dragRafId = requestAnimationFrame(() => { draw(); dragRafId = null; });
+      }
+    } else if (isDragging && lastMouse) {
+      graphTransform.x += e.offsetX - lastMouse.x;
+      graphTransform.y += e.offsetY - lastMouse.y;
+      lastMouse = {x: e.offsetX, y: e.offsetY};
+      markDirty();
+    } else {
+      // Hover
+      const g = mouseToGraph(e);
+      const found = findNode(g.x, g.y);
+      if (found !== hoverNode) {
+        hoverNode = found;
+        glowCache.clear();  // glow sizes change with hover state
+        markDirty();
+      }
+      if (found) {
+        const connections = edges.filter(e => e.source === found.id || e.target === found.id);
+        tooltip.style.display = 'block';
+        tooltip.style.left = Math.min(e.offsetX + 14, W - 220) + 'px';
+        tooltip.style.top = Math.max(e.offsetY - 10, 5) + 'px';
+        let html = '<strong>' + escapeHtml(found.label) + '</strong>';
+        if (found.type) html += ' <span style="opacity:0.5">(' + found.type + ')</span>';
+        if (found.aliases && found.aliases.length) html += '<br>Aliases: ' + found.aliases.map(escapeHtml).join(', ');
+        html += '<br>' + connections.length + ' connection(s)';
+        if (connections.length > 0 && connections.length <= 8) {
+          html += '<br><span style="opacity:0.6">';
+          connections.slice(0, 6).forEach(c => {
+            const other = c.source === found.id ? c.target : c.source;
+            html += '<br>→ ' + escapeHtml(c.label || '?') + ' ' + escapeHtml(other);
+          });
+          if (connections.length > 6) html += '<br>...';
+          html += '</span>';
+        }
+        tooltip.innerHTML = html;
+      } else {
+        tooltip.style.display = 'none';
+      }
+    }
+  };
+
+  canvas.onmouseup = () => {
+    isDragging = false; lastMouse = null;
+    if (dragNode) { dragNode = null; graphDrag = false; }
+  };
+  canvas.onmouseleave = () => {
+    isDragging = false; lastMouse = null; tooltip.style.display = 'none';
+    if (dragNode) { dragNode = null; graphDrag = false; }
+    if (hoverNode) { hoverNode = null; glowCache.clear(); markDirty(); }
+  };
+
+  // Must use addEventListener with {passive: false} — otherwise browsers
+  // treat wheel as passive and ignore preventDefault(), stealing scroll-down
+  // for page scrolling instead of letting us zoom out.
+  canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const factor = e.deltaY > 0 ? 0.9 : 1.1;
+    const mx = e.offsetX, my = e.offsetY;
+    graphTransform.x = mx - (mx - graphTransform.x) * factor;
+    graphTransform.y = my - (my - graphTransform.y) * factor;
+    graphTransform.scale *= factor;
+    graphTransform.scale = Math.max(0.02, Math.min(8, graphTransform.scale));
+    glowCache.clear();  // node sizes change with zoom
+    markDirty();
+  }, {passive: false});
+
+  // ── Auto-fit: run 100 ticks synchronously, then start animated sim ──
+  if (N > 0) {
+    for (let i = 0; i < 100; i++) tick();
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    nodes.forEach(n => { minX = Math.min(minX, n.x); maxX = Math.max(maxX, n.x); minY = Math.min(minY, n.y); maxY = Math.max(maxY, n.y); });
+    const gw = maxX - minX + 100, gh = maxY - minY + 100;
+    const fitScale = Math.min(W / gw, H / gh, 1.5) * 0.85;
+    graphTransform.scale = fitScale;
+    graphTransform.x = W / 2 - ((minX + maxX) / 2) * fitScale;
+    graphTransform.y = H / 2 - ((minY + maxY) / 2) * fitScale;
+  }
+
+  // Start animated simulation (will auto-stop via alpha decay)
+  graphSim = { stop: () => { simRunning = false; if (rafId) { cancelAnimationFrame(rafId); rafId = null; } } };
+  simLoop();
+}
+
+function filterGraph(value) {
+  graphFilter = value;
+  if (window._graphApplyFilter) {
+    window._graphApplyFilter(value);
+  }
+}
+
+// ── Facts Tab ─────────────────────────────────
+async function loadFacts() {
+  try {
+    const r = await fetch('/api/memory/facts?limit=50');
+    if (!r.ok) return;
+    const data = await r.json();
+    renderFacts(data.facts || []);
+  } catch(e) {}
+}
+
+async function searchFacts() {
+  const q = document.getElementById('facts-query').value.trim();
+  try {
+    const url = q ? '/api/memory/facts?query=' + encodeURIComponent(q) + '&limit=20' : '/api/memory/facts?limit=50';
+    const r = await fetch(url);
+    if (!r.ok) return;
+    const data = await r.json();
+    renderFacts(data.facts || []);
+  } catch(e) {}
+}
+
+function renderFacts(facts) {
+  const el = document.getElementById('facts-list');
+  if (!facts.length) {
+    el.innerHTML = '<div style="color:var(--text-secondary);padding:20px;text-align:center">No facts stored yet</div>';
+    return;
+  }
+  el.innerHTML = facts.map(f => {
+    const conf = (f.confidence * 100).toFixed(0);
+    const score = f.score ? ' · score: ' + f.score.toFixed(2) : '';
+    return '<div class="fact-card">' +
+      '<div class="fact-triple">' + escapeHtml(f.subject) + ' <span style="color:var(--accent)">' +
+      escapeHtml(f.predicate) + '</span> ' + escapeHtml(f.object) + '</div>' +
+      '<div class="fact-meta"><span class="fact-badge">' + escapeHtml(f.category) + '</span> ' +
+      conf + '% confidence' + score +
+      (f.issues && f.issues.length ? ' · ' + f.issues.join(', ') : '') +
+      '</div></div>';
+  }).join('');
+}
+
+// ── Memory Debug Tab ──────────────────────────────
+var debugConfig = null;
+var debugOverrides = {};
+var debugLastTrace = null;
+var debugInitialized = false;
+const DEBUG_STORAGE_KEY = 'ragnarbot_debug_overrides';
+
+async function initDebugTab() {
+  if (debugInitialized && debugConfig) return;
+  debugInitialized = true;
+  // Load saved overrides from localStorage
+  try {
+    const saved = localStorage.getItem(DEBUG_STORAGE_KEY);
+    if (saved) debugOverrides = JSON.parse(saved);
+  } catch(e) {}
+  // Load server config
+  try {
+    const r = await fetch('/api/memory/debug/config');
+    if (r.ok) debugConfig = await r.json();
+  } catch(e) {}
+  // Render config immediately (no run needed)
+  renderDebugConfig();
+}
+
+function saveDebugOverrides() {
+  // Collect current values from textareas/checkboxes before saving
+  collectDebugEditorValues();
+  try {
+    localStorage.setItem(DEBUG_STORAGE_KEY, JSON.stringify(debugOverrides));
+  } catch(e) {}
+}
+
+function collectDebugEditorValues() {
+  const ep = document.getElementById('debug-ov-extraction-prompt');
+  if (ep && ep.value !== (debugConfig?.extraction_prompt || '')) debugOverrides.extraction_prompt = ep.value;
+  const gp = document.getElementById('debug-ov-grounding-prompt');
+  if (gp && gp.value !== (debugConfig?.grounding_prompt || '')) debugOverrides.grounding_prompt = gp.value;
+  const enp = document.getElementById('debug-ov-enrichment-prompt');
+  if (enp && enp.value !== (debugConfig?.enrichment_prompt || '')) debugOverrides.enrichment_prompt = enp.value;
+  const gc = document.getElementById('debug-ov-grounding-enabled');
+  if (gc) debugOverrides.grounding_enabled = gc.checked;
+}
+
+function resetDebugOverrides() {
+  debugOverrides = {};
+  try { localStorage.removeItem(DEBUG_STORAGE_KEY); } catch(e) {}
+  if (debugLastTrace) renderDebugTrace(debugLastTrace);
+  else renderDebugConfig();
+}
+
+function renderDebugConfig() {
+  const panel = document.getElementById('debug-pipeline');
+  if (!debugConfig) {
+    panel.innerHTML = '<div class="debug-empty">Loading pipeline config...</div>';
+    return;
+  }
+  let html = '';
+
+  // Extraction
+  html += renderDebugStage('extraction', 'Extraction', 'config', 'blue', true,
+    renderExtractionConfig());
+
+  // Gate 1
+  html += renderDebugStage('gate1', 'Gate 1: Importance Filter', 'config', 'blue', true,
+    renderGate1Config());
+
+  // Gate 2
+  html += renderDebugStage('gate2', 'Gate 2: Duplicate Check', 'config', 'blue', false,
+    renderGate2Config());
+
+  // Gate 3
+  html += renderDebugStage('gate3', 'Gate 3: Grounding Check', 'config', 'blue', true,
+    renderGate3Config());
+
+  // Gate 4
+  html += renderDebugStage('gate4', 'Gate 4: Coherence', 'config', 'blue', false,
+    renderGate4Config());
+
+  // Enrichment
+  html += renderDebugStage('enrichment', 'Enrichment', 'config', 'blue', true,
+    renderEnrichmentConfig());
+
+  // Result placeholder
+  html += renderDebugStage('final', 'Result', 'not run yet', 'yellow', false,
+    '<div class="debug-fact-reason">Run pipeline to see results</div>');
+
+  panel.innerHTML = html;
+  panel.querySelectorAll('.debug-stage-header').forEach(h => {
+    h.onclick = () => h.parentElement.classList.toggle('open');
+  });
+}
+
+function renderSaveBtn(stageId) {
+  return '<div style="margin-top:8px;text-align:right"><button class="debug-btn-secondary" style="font-size:11px;padding:4px 12px" ' +
+    'onclick="saveDebugOverrides()">Save</button>' +
+    '<span id="debug-saved-' + stageId + '" style="font-size:11px;color:#4caf50;margin-left:8px;display:none">Saved</span></div>';
+}
+
+function renderExtractionConfig() {
+  let html = '<div class="debug-editable-section"><label>Extraction Prompt</label>' +
+    '<textarea id="debug-ov-extraction-prompt" rows="10">' +
+    escapeHtml(debugOverrides.extraction_prompt || debugConfig?.extraction_prompt || '') + '</textarea></div>';
+  if (debugConfig?.models?.extraction) {
+    html += '<div style="font-size:11px;color:var(--text-secondary);margin-top:4px">Model: ' +
+      escapeHtml(debugConfig.models.extraction) + '</div>';
+  }
+  html += renderSaveBtn('extraction');
+  return html;
+}
+
+function renderGate1Config() {
+  let html = renderChipEditor('noise_subjects', 'Noise Subjects', debugConfig?.noise_subjects || []);
+  html += renderChipEditor('noise_predicates', 'Noise Predicates', debugConfig?.noise_predicates || []);
+  html += renderChipEditor('always_important', 'Always Important', debugConfig?.always_important || []);
+  html += renderSaveBtn('gate1');
+  return html;
+}
+
+function renderGate2Config() {
+  return '<div class="debug-editable-section"><label>Duplicate Detection</label>' +
+    '<div style="font-size:11px;color:var(--text-secondary);margin-top:2px">' +
+    'Exact match (subject+predicate+object) OR semantic similarity &gt; 0.92</div></div>';
+}
+
+function renderGate3Config() {
+  const enabled = debugOverrides.grounding_enabled !== undefined ? debugOverrides.grounding_enabled : true;
+  let html = '<div class="debug-editable-section"><label style="display:flex;align-items:center;gap:6px">' +
+    '<input type="checkbox" id="debug-ov-grounding-enabled" ' + (enabled ? 'checked' : '') +
+    ' onchange="debugOverrides.grounding_enabled=this.checked"> Grounding enabled</label></div>';
+  html += '<div class="debug-editable-section"><label>Grounding Prompt</label>' +
+    '<textarea id="debug-ov-grounding-prompt" rows="8">' +
+    escapeHtml(debugOverrides.grounding_prompt || debugConfig?.grounding_prompt || '') + '</textarea></div>';
+  if (debugConfig?.models?.grounding) {
+    html += '<div style="font-size:11px;color:var(--text-secondary);margin-top:4px">Model: ' +
+      escapeHtml(debugConfig.models.grounding) + '</div>';
+  }
+  html += renderSaveBtn('gate3');
+  return html;
+}
+
+function renderGate4Config() {
+  return '<div class="debug-editable-section"><label>Exclusive Predicates (supersede old values)</label>' +
+    '<div style="font-size:11px;color:var(--text-secondary);margin-top:2px">' +
+    'lives_in, works_at, current_role, primary_language, timezone, uses_model, current_project</div></div>';
+}
+
+function renderEnrichmentConfig() {
+  let html = '<div class="debug-editable-section"><label>Enrichment Prompt (HQ generation)</label>' +
+    '<textarea id="debug-ov-enrichment-prompt" rows="8">' +
+    escapeHtml(debugOverrides.enrichment_prompt || debugConfig?.enrichment_prompt || '') + '</textarea></div>';
+  if (debugConfig?.models?.enrichment) {
+    html += '<div style="font-size:11px;color:var(--text-secondary);margin-top:4px">Model: ' +
+      escapeHtml(debugConfig.models.enrichment) + '</div>';
+  }
+  html += renderSaveBtn('enrichment');
+  return html;
+}
+
+async function handleDebugFileDrop(e) {
+  e.preventDefault();
+  e.currentTarget.classList.remove('drag-over');
+  const file = e.dataTransfer.files[0];
+  if (file) await uploadDebugFile(file);
+}
+
+function handleDebugFileSelect(e) {
+  const file = e.target.files[0];
+  if (file) uploadDebugFile(file);
+  e.target.value = '';
+}
+
+async function uploadDebugFile(file) {
+  const formData = new FormData();
+  formData.append('file', file);
+  try {
+    const r = await fetch('/api/memory/debug/upload', { method: 'POST', body: formData });
+    if (!r.ok) return;
+    const data = await r.json();
+    document.getElementById('debug-input').value = data.text || '';
+    if (data.truncated) {
+      document.getElementById('debug-upload-zone').textContent = file.name + ' (truncated to ' + data.chars + ' chars)';
+    } else {
+      document.getElementById('debug-upload-zone').innerHTML = file.name + ' (' + data.chars + ' chars) <label style="color:var(--accent);cursor:pointer">change<input type="file" accept=".md,.txt,.csv,.json,.log,.rst" style="display:none" onchange="handleDebugFileSelect(event)"></label>';
+    }
+  } catch(e) {}
+}
+
+async function runDebugPipeline(store) {
+  const text = document.getElementById('debug-input').value.trim();
+  if (!text || text.length < 10) return;
+
+  // Collect latest editor values before sending
+  collectDebugEditorValues();
+
+  const runBtn = document.getElementById('debug-run-btn');
+  const storeBtn = document.getElementById('debug-store-btn');
+  runBtn.disabled = true;
+  storeBtn.disabled = true;
+  runBtn.innerHTML = '<span class="debug-spinner"></span> Running...';
+
+  const panel = document.getElementById('debug-pipeline');
+  panel.innerHTML = '<div class="debug-empty"><span class="debug-spinner"></span> Running pipeline stages...</div>';
+
+  const endpoint = store ? '/api/memory/debug/store' : '/api/memory/debug/extract';
+  try {
+    const r = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, overrides: debugOverrides }),
+    });
+    const trace = await r.json();
+    if (trace.error) {
+      panel.innerHTML = '<div class="debug-empty" style="color:#f44336">' + escapeHtml(trace.error) + '</div>';
+    } else {
+      debugLastTrace = trace;
+      renderDebugTrace(trace);
+    }
+  } catch(e) {
+    panel.innerHTML = '<div class="debug-empty" style="color:#f44336">Request failed: ' + escapeHtml(String(e)) + '</div>';
+  }
+
+  runBtn.disabled = false;
+  storeBtn.disabled = false;
+  runBtn.textContent = 'Run Pipeline';
+}
+
+function renderDebugTrace(trace) {
+  const s = trace.stages;
+  const panel = document.getElementById('debug-pipeline');
+  document.getElementById('debug-store-btn').disabled = !(s.final && s.final.passed_all_gates > 0);
+  let html = '';
+
+  // Stage 1: Extraction
+  const exFacts = s.extraction?.facts || [];
+  html += renderDebugStage('extraction', 'Extraction', exFacts.length + ' facts', 'blue', true,
+    renderExtractionBody(s.extraction));
+
+  // Stage 2: Gate 1 - Importance
+  const g1 = s.gate1_importance?.results || [];
+  const g1pass = g1.filter(r => r.passed).length;
+  const g1fail = g1.length - g1pass;
+  html += renderDebugStage('gate1', 'Gate 1: Importance Filter', g1pass + ' passed, ' + g1fail + ' rejected',
+    g1fail > 0 ? 'yellow' : 'green', true, renderGate1Body(g1));
+
+  // Stage 3: Gate 2 - Duplicates
+  const g2 = s.gate2_duplicates?.results || [];
+  const g2dup = g2.filter(r => r.is_duplicate).length;
+  html += renderDebugStage('gate2', 'Gate 2: Duplicate Check', (g2.length - g2dup) + ' unique, ' + g2dup + ' duplicates',
+    g2dup > 0 ? 'yellow' : 'green', true, renderGate2Body(g2));
+
+  // Stage 4: Gate 3 - Grounding
+  const g3 = s.gate3_grounding?.results || [];
+  const g3fail = g3.filter(r => !r.grounded).length;
+  html += renderDebugStage('gate3', 'Gate 3: Grounding Check', (g3.length - g3fail) + ' grounded, ' + g3fail + ' hallucinated',
+    g3fail > 0 ? 'red' : 'green', true, renderGate3Body(g3));
+
+  // Stage 5: Gate 4 - Coherence
+  const g4 = s.gate4_coherence?.results || [];
+  const g4conflicts = g4.filter(r => !r.coherent).length;
+  html += renderDebugStage('gate4', 'Gate 4: Coherence', g4.length + ' checked, ' + g4conflicts + ' conflicts',
+    g4conflicts > 0 ? 'yellow' : 'green', true, renderGate4Body(g4));
+
+  // Stage 6: Enrichment
+  const enr = s.enrichment?.results || [];
+  html += renderDebugStage('enrichment', 'Enrichment', enr.length + ' enriched', 'blue', true, renderEnrichmentBody(enr));
+
+  // Stage 7: Final
+  const fin = s.final || {};
+  const stored = fin.stored || 0;
+  const passed = fin.passed_all_gates || 0;
+  const rejected = fin.rejected || 0;
+  html += renderDebugStage('final', 'Result', passed + ' passed, ' + rejected + ' rejected' + (stored ? ', ' + stored + ' stored' : ''),
+    passed > 0 ? 'green' : 'red', true, renderFinalBody(fin));
+
+  panel.innerHTML = html;
+
+  // Attach toggle listeners
+  panel.querySelectorAll('.debug-stage-header').forEach(h => {
+    h.onclick = () => h.parentElement.classList.toggle('open');
+  });
+}
+
+function renderDebugStage(id, title, countText, countColor, openByDefault, bodyHtml) {
+  return '<div class="debug-stage' + (openByDefault ? ' open' : '') + '" id="debug-stage-' + id + '">' +
+    '<div class="debug-stage-header"><span class="arrow">&#9654;</span> ' + escapeHtml(title) +
+    '<span class="debug-stage-count debug-count-' + countColor + '">' + escapeHtml(countText) + '</span></div>' +
+    '<div class="debug-stage-body">' + bodyHtml + '</div></div>';
+}
+
+function renderExtractionBody(stage) {
+  let html = renderExtractionConfig();
+  if (!stage) return html;
+  // Raw response
+  html += '<div class="debug-editable-section"><label>Raw LLM Response</label>' +
+    '<pre style="font-size:11px;color:var(--text-secondary);white-space:pre-wrap;max-height:200px;overflow:auto;margin:0">' +
+    escapeHtml(stage.raw_response || '') + '</pre></div>';
+  // Facts
+  if (stage.facts && stage.facts.length) {
+    html += '<div style="margin-top:8px"><label style="font-size:11px;color:var(--text-secondary);font-weight:500">Extracted Facts</label>';
+    stage.facts.forEach(f => {
+      html += '<div class="debug-fact-row info"><span class="debug-icon">&#x1f4a1;</span><div>' +
+        '<div class="debug-fact-triple">' + escapeHtml(f.subject) + ' <span style="color:var(--accent)">' +
+        escapeHtml(f.predicate) + '</span> ' + escapeHtml(f.object) + '</div>' +
+        '<div class="debug-fact-reason">confidence: ' + f.confidence + ' · category: ' + f.category + '</div></div></div>';
+    });
+    html += '</div>';
+  } else {
+    html += '<div class="debug-fact-reason" style="margin-top:8px">No facts extracted</div>';
+  }
+  return html;
+}
+
+function renderGate1Body(results) {
+  let html = renderGate1Config();
+  if (!results.length) return html;
+  html += '<div style="margin-top:8px"><label style="font-size:11px;color:var(--text-secondary);font-weight:500">Results</label>';
+  results.forEach(r => {
+    const cls = r.passed ? 'passed' : 'rejected';
+    const icon = r.passed ? '&#x2705;' : '&#x274c;';
+    html += '<div class="debug-fact-row ' + cls + '"><span class="debug-icon">' + icon + '</span><div>' +
+      '<div class="debug-fact-triple">' + escapeHtml(r.fact) + '</div>' +
+      '<div class="debug-fact-reason">' + escapeHtml(r.reason) + '</div></div></div>';
+  });
+  html += '</div>';
+  return html;
+}
+
+function renderChipEditor(key, label, defaults) {
+  const current = debugOverrides[key] || defaults;
+  let html = '<div class="debug-editable-section"><label>' + escapeHtml(label) + '</label><div class="debug-chips" id="debug-chips-' + key + '">';
+  current.forEach(v => {
+    html += '<span class="debug-chip">' + escapeHtml(v) + '<span class="remove-chip" onclick="removeDebugChip(\'' + key + '\',\'' + escapeHtml(v) + '\')">&times;</span></span>';
+  });
+  html += '<span class="debug-chip-add" onclick="addDebugChip(\'' + key + '\')">+ add</span>';
+  html += '</div></div>';
+  return html;
+}
+
+function removeDebugChip(key, value) {
+  const defaults = key === 'noise_subjects' ? (debugConfig?.noise_subjects || []) :
+                   key === 'noise_predicates' ? (debugConfig?.noise_predicates || []) :
+                   (debugConfig?.always_important || []);
+  const current = debugOverrides[key] || [...defaults];
+  debugOverrides[key] = current.filter(v => v !== value);
+  if (debugLastTrace) renderDebugTrace(debugLastTrace);
+  else renderDebugConfig();
+}
+
+function addDebugChip(key) {
+  const val = prompt('Add value:');
+  if (!val) return;
+  const defaults = key === 'noise_subjects' ? (debugConfig?.noise_subjects || []) :
+                   key === 'noise_predicates' ? (debugConfig?.noise_predicates || []) :
+                   (debugConfig?.always_important || []);
+  const current = debugOverrides[key] || [...defaults];
+  current.push(val.trim().toLowerCase());
+  debugOverrides[key] = current;
+  if (debugLastTrace) renderDebugTrace(debugLastTrace);
+  else renderDebugConfig();
+}
+
+function renderGate2Body(results) {
+  let html = renderGate2Config();
+  if (!results.length) return html;
+  html += '<div style="margin-top:8px"><label style="font-size:11px;color:var(--text-secondary);font-weight:500">Results</label>';
+  results.forEach(r => {
+    const cls = r.is_duplicate ? 'rejected' : 'passed';
+    const icon = r.is_duplicate ? '&#x1f501;' : '&#x2705;';
+    const detail = r.is_duplicate ? 'duplicate (' + r.action + ', similarity: ' + r.similarity + ')' : 'unique';
+    html += '<div class="debug-fact-row ' + cls + '"><span class="debug-icon">' + icon + '</span><div>' +
+      '<div class="debug-fact-triple">' + escapeHtml(r.fact) + '</div>' +
+      '<div class="debug-fact-reason">' + escapeHtml(detail) + (r.error ? ' ERROR: ' + r.error : '') + '</div></div></div>';
+  });
+  return html;
+}
+
+function renderGate3Body(results) {
+  let html = renderGate3Config();
+  if (!results.length) return html;
+  results.forEach(r => {
+    const cls = r.grounded ? 'passed' : 'rejected';
+    const icon = r.grounded ? '&#x2705;' : '&#x1f6ab;';
+    let detail = r.grounded ? 'grounded (confidence: ' + r.confidence + ')' : 'NOT grounded';
+    if (r.evidence) detail += ' — evidence: "' + r.evidence + '"';
+    if (r.skipped) detail = 'skipped (disabled)';
+    html += '<div class="debug-fact-row ' + cls + '"><span class="debug-icon">' + icon + '</span><div>' +
+      '<div class="debug-fact-triple">' + escapeHtml(r.fact) + '</div>' +
+      '<div class="debug-fact-reason">' + escapeHtml(detail) + '</div></div></div>';
+  });
+  return html;
+}
+
+function renderGate4Body(results) {
+  let html = renderGate4Config();
+  if (!results.length) return html;
+  results.forEach(r => {
+    const cls = r.coherent ? 'passed' : 'warning';
+    const icon = r.coherent ? '&#x2705;' : '&#x26a0;&#xfe0f;';
+    let detail = r.coherent ? 'coherent' : 'conflict: ' + r.conflict_type + ' (old: ' + r.old_value + ' → new: ' + r.new_value + ', action: ' + r.action + ')';
+    html += '<div class="debug-fact-row ' + cls + '"><span class="debug-icon">' + icon + '</span><div>' +
+      '<div class="debug-fact-triple">' + escapeHtml(r.fact) + '</div>' +
+      '<div class="debug-fact-reason">' + escapeHtml(detail) + '</div></div></div>';
+  });
+  return html;
+}
+
+function renderEnrichmentBody(results) {
+  let html = renderEnrichmentConfig();
+  if (!results.length) return html;
+  results.forEach(r => {
+    html += '<div class="debug-fact-row info"><span class="debug-icon">&#x2728;</span><div>' +
+      '<div class="debug-fact-triple">' + escapeHtml(r.fact) + '</div>' +
+      '<div class="debug-fact-reason">category: ' + escapeHtml(r.category || '?') +
+      ' · HQ: ' + (r.hq || []).map(q => '"' + escapeHtml(q) + '"').join(', ') +
+      ' · keywords: ' + (r.keywords || []).join(', ') +
+      (r.error ? ' ERROR: ' + r.error : '') + '</div></div></div>';
+  });
+  return html;
+}
+
+function renderFinalBody(fin) {
+  const facts = fin.facts || [];
+  if (!facts.length) return '<div class="debug-fact-reason">No facts reached final stage</div>';
+  let html = '<div style="margin-bottom:8px;font-size:12px;color:var(--text-secondary)">' +
+    'Passed all gates: ' + (fin.passed_all_gates || 0) + ' · Rejected: ' + (fin.rejected || 0) +
+    (fin.stored ? ' · Stored: ' + fin.stored : '') + '</div>';
+  facts.forEach(f => {
+    const cls = f.stored ? 'passed' : 'info';
+    const icon = f.stored ? '&#x1f4be;' : '&#x1f4cb;';
+    html += '<div class="debug-fact-row ' + cls + '"><span class="debug-icon">' + icon + '</span><div>' +
+      '<div class="debug-fact-triple">' + escapeHtml(f.subject) + ' <span style="color:var(--accent)">' +
+      escapeHtml(f.predicate) + '</span> ' + escapeHtml(f.object) + '</div>' +
+      '<div class="debug-fact-reason">confidence: ' + f.confidence + ' · category: ' + f.category +
+      (f.stored ? ' · STORED' : ' · dry-run') +
+      (f.error ? ' ERROR: ' + f.error : '') + '</div></div></div>';
+  });
+  // Entities (graph nodes)
+  const entities = fin.entities || [];
+  if (entities.length) {
+    html += '<div style="margin-top:12px"><label style="font-size:11px;color:var(--text-secondary);font-weight:500">Graph Entities (' + entities.length + ')</label>';
+    entities.forEach(e => {
+      html += '<div class="debug-fact-row info"><span class="debug-icon">&#x1f310;</span><div>' +
+        '<div class="debug-fact-triple">' + escapeHtml(e.name || '') + '</div>' +
+        '<div class="debug-fact-reason">type: ' + escapeHtml(e.entity_type || '?') +
+        (e.aliases && e.aliases.length ? ' · aliases: ' + e.aliases.map(a => escapeHtml(a)).join(', ') : '') +
+        '</div></div></div>';
+    });
+    html += '</div>';
+  }
+  return html;
+}
+
+async function purgeMemory() {
+  if (!confirm('Delete ALL facts from pgvector and ALL nodes/edges from Neo4j?\n\nThis cannot be undone.')) return;
+  if (!confirm('Are you ABSOLUTELY sure? Type OK to confirm.')) return;
+  try {
+    const r = await fetch('/api/memory/debug/purge', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirm: 'PURGE ALL' }),
+    });
+    const data = await r.json();
+    if (data.error) { alert('Error: ' + data.error); return; }
+    let msg = 'Purge complete:\n';
+    if (data.pgvector) msg += 'pgvector: ' + (data.pgvector.deleted_facts || 0) + ' facts deleted\n';
+    if (data.neo4j) msg += 'Neo4j: ' + (data.neo4j.nodes || 0) + ' nodes deleted';
+    if (data.pgvector?.error) msg += '\npgvector error: ' + data.pgvector.error;
+    if (data.neo4j?.error) msg += '\nNeo4j error: ' + data.neo4j.error;
+    alert(msg);
+  } catch(e) { alert('Request failed: ' + e); }
+}
+
+// ── Skills Tab ─────────────────────────────────
+async function loadSkills() {
+  try {
+    const r = await fetch('/api/skills');
+    if (!r.ok) return;
+    const skills = await r.json();
+    const el = document.getElementById('skills-content');
+    if (!skills.length) { el.innerHTML = '<div class="dash-empty">No skills</div>'; return; }
+    let html = '<table class="dash-table"><tr><th>Name</th><th>Description</th><th>Source</th><th>Available</th></tr>';
+    skills.forEach(s => {
+      const avail = s.available ? '<span class="badge completed">Yes</span>' : '<span class="badge error">No</span>';
+      html += '<tr><td>' + escapeHtml(s.name) + '</td><td>' + escapeHtml(s.description || '') + '</td><td>' + escapeHtml(s.source || '') + '</td><td>' + avail + '</td></tr>';
+    });
+    html += '</table>';
+    el.innerHTML = html;
+  } catch(e) {}
+}
+
+// ── Logs Tab ───────────────────────────────────
+function startLogStream() {
+  if (logEvtSource) logEvtSource.close();
+  logEvtSource = new EventSource('/api/logs/stream');
+  logEvtSource.onmessage = (e) => {
+    try {
+      const entry = JSON.parse(e.data);
+      if (logFilter !== 'all' && entry.level !== logFilter) return;
+      const viewer = document.getElementById('log-viewer');
+      const div = document.createElement('div');
+      div.className = 'log-entry log-' + entry.level;
+      div.textContent = entry.time.slice(0, 19) + ' [' + entry.level + '] ' + entry.message;
+      viewer.appendChild(div);
+      // Limit entries
+      while (viewer.children.length > 500) viewer.removeChild(viewer.firstChild);
+      if (document.getElementById('log-autoscroll').checked) {
+        viewer.scrollTop = viewer.scrollHeight;
+      }
+    } catch(err) {}
+  };
+}
+
+function setLogFilter(level, btn) {
+  logFilter = level;
+  document.querySelectorAll('.log-filter').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  // Apply filter to existing entries
+  const viewer = document.getElementById('log-viewer');
+  for (const el of viewer.children) {
+    if (level === 'all') { el.style.display = ''; }
+    else { el.style.display = el.classList.contains('log-' + level) ? '' : 'none'; }
+  }
+}
+
+// ── Lightbox ───────────────────────────────────
+document.addEventListener('click', e => {
+  const img = e.target.closest('.message-content img');
+  if (!img) return;
+  const lb = document.getElementById('lightbox');
+  const content = document.getElementById('lightbox-content');
+  content.innerHTML = '<img src="' + img.src + '">';
+  lb.classList.add('active');
+});
+
+// Also handle video clicks
+document.addEventListener('click', e => {
+  const vid = e.target.closest('.message-content video');
+  if (!vid) return;
+  const lb = document.getElementById('lightbox');
+  const content = document.getElementById('lightbox-content');
+  const newVid = '<video controls autoplay src="' + vid.querySelector('source')?.src || vid.src + '"></video>';
+  content.innerHTML = newVid;
+  lb.classList.add('active');
+});
+
+function closeLightbox() {
+  document.getElementById('lightbox').classList.remove('active');
+  document.getElementById('lightbox-content').innerHTML = '';
+}
+
+document.getElementById('lightbox').addEventListener('click', e => {
+  // Only keep open if clicking directly on the image/video
+  if (e.target.tagName === 'IMG' || e.target.tagName === 'VIDEO') return;
+  closeLightbox();
+});
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeLightbox();
+});
+
+// ── Preview Panel ──────────────────────────────
+
+var currentPreviewUrl = '';
+
+function openPreview(url, title) {
+  currentPreviewUrl = url;
+  const panel = document.getElementById('preview-panel');
+  const iframe = document.getElementById('preview-iframe');
+  const titleEl = document.getElementById('preview-title');
+  titleEl.textContent = title || url.split('/').pop();
+  iframe.src = url;
+  panel.classList.add('active');
+}
+
+function closePreview() {
+  const panel = document.getElementById('preview-panel');
+  const iframe = document.getElementById('preview-iframe');
+  panel.classList.remove('active');
+  iframe.src = 'about:blank';
+  currentPreviewUrl = '';
+}
+
+function refreshPreview() {
+  const iframe = document.getElementById('preview-iframe');
+  if (currentPreviewUrl) iframe.src = currentPreviewUrl;
+}
+
+function openPreviewNewTab() {
+  if (currentPreviewUrl) window.open(currentPreviewUrl, '_blank');
+}
+
+// Resizable preview panel
+(function() {
+  const handle = document.getElementById('preview-resize');
+  const panel = document.getElementById('preview-panel');
+  let dragging = false;
+
+  handle.addEventListener('mousedown', (e) => {
+    dragging = true;
+    handle.classList.add('dragging');
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    e.preventDefault();
+  });
+
+  document.addEventListener('mousemove', (e) => {
+    if (!dragging) return;
+    const container = document.querySelector('.chat-container');
+    const rect = container.getBoundingClientRect();
+    const newWidth = rect.right - e.clientX;
+    const minW = 320;
+    const maxW = rect.width * 0.75;
+    panel.style.width = Math.min(Math.max(newWidth, minW), maxW) + 'px';
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (dragging) {
+      dragging = false;
+      handle.classList.remove('dragging');
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    }
+  });
+})();
+
+// ── Init ───────────────────────────────────────
+checkAuth();
+</script>
+
+</body>
+</html>

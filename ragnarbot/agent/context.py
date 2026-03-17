@@ -59,11 +59,16 @@ class ContextBuilder:
         if builtin:
             parts.append(builtin)
 
-        # 3. Built-in Telegram (conditional, raw)
+        # 3. Built-in channel context (conditional, raw)
         if channel == "telegram" and session_metadata and "user_data" in session_metadata:
             telegram = self._load_builtin_telegram(session_metadata["user_data"])
             if telegram:
                 parts.append(telegram)
+
+        if channel == "web":
+            web_ctx = self._load_builtin_web(session_metadata or {})
+            if web_ctx:
+                parts.append(web_ctx)
 
         # 3b. Cron isolated mode (conditional)
         if session_metadata and session_metadata.get("cron_isolated"):
@@ -173,6 +178,19 @@ Use `agent_spawn` to start a task with a specific agent type, or omit the agent 
             full_name=full_name or "Unknown",
             username=user_data.get("username") or "N/A",
             user_id=user_data.get("user_id") or "N/A",
+            reaction_emojis=reaction_emojis,
+        )
+
+    def _load_builtin_web(self, session_metadata: dict) -> str:
+        """Load the built-in Web UI context file with session placeholders."""
+        file_path = BUILTIN_DIR / "WEB.md"
+        if not file_path.exists():
+            return ""
+        content = file_path.read_text(encoding="utf-8")
+        session_id = session_metadata.get("session_id", "web_session")
+        reaction_emojis = "\U0001f44d \u2764\ufe0f \U0001f525 \U0001f602 \U0001f622 \U0001f389 \U0001f631 \U0001f4af"
+        return content.format(
+            session_id=session_id,
             reaction_emojis=reaction_emojis,
         )
 
@@ -330,7 +348,10 @@ Use `agent_spawn` to start a task with a specific agent type, or omit the agent 
             for ref in media_refs:
                 if ref.get("type") != "photo":
                     continue
-                photo_path = media_base / session_key / "photos" / ref["filename"]
+                fname = ref.get("filename")
+                if not fname:
+                    continue
+                photo_path = media_base / session_key / "photos" / fname
                 if not photo_path.is_file():
                     continue
                 mime, _ = mimetypes.guess_type(str(photo_path))

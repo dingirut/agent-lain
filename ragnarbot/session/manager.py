@@ -361,6 +361,46 @@ class SessionManager:
 
         self._cache[session.key] = session
 
+    def rename(self, session_id: str, title: str) -> bool:
+        """
+        Set a display title for a session.
+
+        Args:
+            session_id: The session ID.
+            title: The new title.
+
+        Returns:
+            True if renamed, False if not found.
+        """
+        # Update in-memory cache
+        if session_id in self._cache:
+            self._cache[session_id].metadata["title"] = title
+            self.save(self._cache[session_id])
+            return True
+
+        # Load, update, save
+        path = self._get_session_path(session_id)
+        if not path.exists():
+            return False
+
+        # Quick patch: rewrite only the metadata line
+        try:
+            with open(path) as f:
+                lines = f.readlines()
+            if lines:
+                first = json.loads(lines[0])
+                if first.get("_type") == "metadata":
+                    meta = first.get("metadata", {})
+                    meta["title"] = title
+                    first["metadata"] = meta
+                    lines[0] = json.dumps(first, ensure_ascii=False) + "\n"
+                    with open(path, "w") as f:
+                        f.writelines(lines)
+                    return True
+        except Exception as e:
+            logger.warning(f"Failed to rename session {session_id}: {e}")
+        return False
+
     def delete(self, session_id: str) -> bool:
         """
         Delete a session.
@@ -402,11 +442,13 @@ class SessionManager:
                     if user_key and stored_user_key != user_key:
                         continue
 
+                    meta = data.get("metadata", {})
                     sessions.append({
                         "session_id": path.stem,
                         "user_key": stored_user_key,
                         "created_at": data.get("created_at"),
                         "updated_at": data.get("updated_at"),
+                        "title": meta.get("title", ""),
                         "path": str(path),
                     })
             except Exception:

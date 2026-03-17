@@ -39,6 +39,12 @@ from ragnarbot.agent.tools.telegram import (
 )
 from ragnarbot.agent.tools.update import UpdateTool
 from ragnarbot.agent.tools.web import WebFetchTool, WebSearchTool
+from ragnarbot.agent.memory.tools import (
+    MemoryExtractTool,
+    MemoryForgetTool,
+    MemorySearchTool,
+    MemoryStoreTool,
+)
 from ragnarbot.bus.events import InboundMessage, OutboundMessage
 from ragnarbot.bus.queue import MessageBus
 from ragnarbot.media.manager import MediaManager
@@ -82,6 +88,7 @@ class AgentLoop:
         provider_factory: "Callable | None" = None,
         trace_mode: bool = False,
         browser_config: "BrowserConfig | None" = None,
+        memory_store: "Any | None" = None,
     ):
         from ragnarbot.config.schema import ExecToolConfig
         from ragnarbot.cron.service import CronService
@@ -99,6 +106,7 @@ class AgentLoop:
         self.max_context_tokens = max_context_tokens
         self.context_mode = context_mode
         self.trace_mode = trace_mode
+        self.memory_store = memory_store
         self.cache_manager = CacheManager(max_context_tokens=max_context_tokens)
 
         # Fallback model support
@@ -204,6 +212,13 @@ class AgentLoop:
         # Download file tool (for lazy file downloads)
         if self.media_manager:
             self.tools.register(DownloadFileTool(self.media_manager))
+
+        # Memory tools (semantic memory)
+        if self.memory_store:
+            self.tools.register(MemorySearchTool(memory=self.memory_store))
+            self.tools.register(MemoryStoreTool(memory=self.memory_store))
+            self.tools.register(MemoryForgetTool(memory=self.memory_store))
+            self.tools.register(MemoryExtractTool(memory=self.memory_store))
 
         # Config and restart tools
         self.tools.register(ConfigTool(agent=self))
@@ -385,23 +400,46 @@ class AgentLoop:
                 logger.info("Probing primary provider for recovery...")
 
             chat_kwargs["model"] = self.model
-            if session_key:
-                response = await self._chat_or_stop(
-                    session_key, provider=self.provider, **chat_kwargs,
+
+            # Retry loop for transient errors (overloaded, rate limit, 529)
+            max_retries = 8
+            retry_base = 2  # seconds
+            retry_cap = 60
+
+            for attempt in range(1, max_retries + 1):
+                if session_key:
+                    response = await self._chat_or_stop(
+                        session_key, provider=self.provider, **chat_kwargs,
+                    )
+                else:
+                    response = await self.provider.chat(**chat_kwargs)
+
+                if response is None:
+                    return None, False, None  # stopped by user
+
+                if response.finish_reason != "error":
+                    was_fallback = state.record_primary_success()
+                    if was_fallback:
+                        logger.info("Primary provider recovered — exiting fallback mode")
+                        self._fb_just_recovered = True
+                        state.save()
+                    return response, False, None
+
+                # Check if error is transient and worth retrying
+                err_content = (response.content or "").lower()
+                is_transient = any(kw in err_content for kw in (
+                    "overloaded", "529", "rate limit", "too many requests",
+                    "service unavailable", "internal server error",
+                ))
+                if not is_transient or attempt == max_retries:
+                    break
+
+                delay = min(retry_base ** attempt, retry_cap)
+                logger.warning(
+                    f"Transient LLM error (attempt {attempt}/{max_retries}), "
+                    f"retrying in {delay}s: {(response.content or '')[:150]}"
                 )
-            else:
-                response = await self.provider.chat(**chat_kwargs)
-
-            if response is None:
-                return None, False, None  # stopped by user
-
-            if response.finish_reason != "error":
-                was_fallback = state.record_primary_success()
-                if was_fallback:
-                    logger.info("Primary provider recovered — exiting fallback mode")
-                    self._fb_just_recovered = True
-                    state.save()
-                return response, False, None
+                await asyncio.sleep(delay)
 
             # Primary failed
             primary_error = response.content or "Unknown error"
@@ -541,7 +579,7 @@ class AgentLoop:
                             metadata={"stop_typing": True},
                         ))
                 except Exception as e:
-                    logger.error(f"Error processing message: {e}")
+                    logger.opt(exception=True).error(f"Error processing message: {e}")
                     await self.bus.publish_outbound(OutboundMessage(
                         channel=msg.channel,
                         chat_id=msg.chat_id,
@@ -679,6 +717,12 @@ class AgentLoop:
         if isinstance(download_tool, DownloadFileTool):
             download_tool.set_context(msg.channel, session.key)
 
+        # Memory tools context
+        for mem_tool_name in ("memory_search", "memory_store", "memory_forget", "memory_extract"):
+            mem_tool = self.tools.get(mem_tool_name)
+            if mem_tool and hasattr(mem_tool, "set_context"):
+                mem_tool.set_context(msg.channel, msg.chat_id)
+
         # Telegram media tools
         last_message_id = batch[-1].metadata.get("message_id")
         for tool_name in ("send_photo", "send_video", "send_file"):
@@ -721,7 +765,7 @@ class AgentLoop:
                 photo_paths = [
                     str(self.media_manager.get_photo_path(session.key, ref["filename"]))
                     for ref in media_refs
-                    if ref["type"] == "photo"
+                    if ref.get("type") == "photo" and ref.get("filename")
                 ]
                 if photo_paths:
                     markers = "\n".join(f"[photo saved: {p}]" for p in photo_paths)
@@ -750,6 +794,19 @@ class AgentLoop:
                 "raw_msg": m,
             })
 
+        # -- Async recall: inject semantic memory context --
+        recall_context = ""
+        if (
+            self.memory_store
+            and self.memory_store.has_vector
+            and self.memory_store.auto_inject
+        ):
+            try:
+                user_text = " ".join(d["prefixed_content"] for d in batch_data)
+                recall_context = await self.memory_store.recall_for_context(user_text)
+            except Exception as _recall_err:
+                logger.debug(f"Memory recall skipped: {_recall_err}")
+
         # -- Build LLM messages: first item uses build_messages (includes history) --
         first = batch_data[0]
         messages = self.context.build_messages(
@@ -762,6 +819,13 @@ class AgentLoop:
             chat_id=msg.chat_id,
             session_metadata=session.metadata,
         )
+
+        # Inject recall context into system prompt
+        if recall_context:
+            for m_entry in messages:
+                if m_entry.get("role") == "system":
+                    m_entry["content"] += f"\n\n# Recalled Memory\n\n{recall_context}"
+                    break
 
         # Append additional user messages for the rest of the batch
         for item in batch_data[1:]:
@@ -1013,6 +1077,17 @@ class AgentLoop:
                 )
         self.sessions.save(session)
 
+        # -- Background extraction: non-blocking fact extraction after turn --
+        if self.memory_store and not stopped:
+            user_text = " ".join(d["prefixed_content"] for d in batch_data)
+            assistant_text = final_content or ""
+            extraction_text = f"User: {user_text}\nAssistant: {assistant_text}"
+            self.memory_store.trigger_background_extraction(
+                text=extraction_text,
+                session_key=session.key,
+                channel=msg.channel,
+            )
+
         if stopped or not outbound_content:
             return None
 
@@ -1021,7 +1096,7 @@ class AgentLoop:
             chat_id=msg.chat_id,
             content=outbound_content
         )
-    
+
     def _handle_command(self, command: str, msg: InboundMessage) -> OutboundMessage | None:
         """Dispatch a channel command without calling the LLM."""
         if command == "new_chat":

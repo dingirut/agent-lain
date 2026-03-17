@@ -326,6 +326,24 @@ Report this status to the user naturally."""
 
         return f"{status_line}\n\n{output}"
 
+    def list_jobs(self) -> list[dict]:
+        """List all non-consumed jobs as dicts for API consumption."""
+        self._cleanup_stale()
+        result = []
+        for j in self._jobs.values():
+            if j.status == JobState.consumed:
+                continue
+            elapsed = (j.finished_at or time.time()) - j.started_at
+            result.append({
+                "id": j.job_id,
+                "label": j.label,
+                "command": j.command,
+                "status": j.status.value,
+                "exit_code": j.exit_code,
+                "elapsed": round(elapsed, 1),
+            })
+        return result
+
     def get_status_summary(self) -> str:
         """Formatted summary of all non-consumed jobs."""
         visible = [j for j in self._jobs.values() if j.status != JobState.consumed]

@@ -18,7 +18,7 @@ class ChannelManager:
     Manages chat channels and coordinates message routing.
 
     Responsibilities:
-    - Initialize enabled channels (Telegram)
+    - Initialize enabled channels (Telegram, Web)
     - Start/stop channels
     - Route outbound messages
     """
@@ -29,11 +29,17 @@ class ChannelManager:
         bus: MessageBus,
         credentials: Credentials | None = None,
         media_manager: MediaManager | None = None,
+        cron_service: Any = None,
+        heartbeat_service: Any = None,
+        agent_loop: Any = None,
     ):
         self.config = config
         self.bus = bus
         self.credentials = credentials or Credentials()
         self.media_manager = media_manager
+        self.cron_service = cron_service
+        self.heartbeat_service = heartbeat_service
+        self.agent_loop = agent_loop
         self.channels: dict[str, BaseChannel] = {}
         self._dispatch_task: asyncio.Task | None = None
 
@@ -62,7 +68,40 @@ class ChannelManager:
                 logger.info("Telegram channel enabled")
             except ImportError as e:
                 logger.warning(f"Telegram channel not available: {e}")
-        
+
+        # Web UI channel
+        if self.config.channels.web.enabled:
+            try:
+                from ragnarbot.channels.web import WebChannel
+                from ragnarbot.providers.transcription import create_transcription_provider
+
+                transcriber = create_transcription_provider(
+                    self.config.transcription.provider,
+                    self.credentials.services,
+                )
+
+                # Get session manager from agent loop if available
+                session_manager = None
+                workspace = self.config.workspace_path
+                if self.agent_loop and hasattr(self.agent_loop, "sessions"):
+                    session_manager = self.agent_loop.sessions
+
+                self.channels["web"] = WebChannel(
+                    config=self.config.channels.web,
+                    bus=self.bus,
+                    password_hash=self.credentials.channels.web.password_hash,
+                    transcription_provider=transcriber,
+                    media_manager=self.media_manager,
+                    cron_service=self.cron_service,
+                    heartbeat_service=self.heartbeat_service,
+                    agent_loop=self.agent_loop,
+                    session_manager=session_manager,
+                    workspace=workspace,
+                )
+                logger.info("Web UI channel enabled")
+            except ImportError as e:
+                logger.warning(f"Web UI channel not available: {e}")
+
     
     async def start_all(self) -> None:
         """Start all channels and the outbound dispatcher."""

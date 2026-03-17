@@ -169,6 +169,30 @@ Manage periodic heartbeat tasks in HEARTBEAT.md. Actions:
 ### heartbeat_done
 Signal that the heartbeat check is complete with nothing to report. Only available during heartbeat execution. Call this instead of `deliver_result` when all tasks have been checked and there is nothing noteworthy to tell the user.
 
+## Semantic Memory
+
+Long-term semantic memory backed by pgvector and Neo4j. Facts are stored as subject-predicate-object triples with confidence scores, categories, and temporal validity. Memory has two layers: Layer 0 (file-based, always available) and Layer 1 (vector/graph, requires database).
+
+### memory_search
+Search semantic memory for facts. Returns scored results ranked by relevance using hybrid search (vector similarity + keyword match + graph traversal). Use to recall previously learned information about people, projects, preferences, and events.
+
+### memory_store
+Explicitly store a fact in memory. Use when the user asks you to "remember" something. Facts are extracted from natural language, validated for grounding, enriched with hypothetical questions and keywords, and stored with high confidence.
+
+### memory_forget
+Invalidate facts from memory. Use when the user asks to forget something or when information is known to be outdated. Finds matching facts by semantic search and marks them as invalid.
+
+### memory_extract
+Extract and store facts from a conversation excerpt. Runs the full validation pipeline: extraction → importance filter → deduplication → grounding check → coherence check → enrichment → storage. Use for explicit batch processing of text.
+
+**Memory config (hot-reloadable via `config set`):**
+- `memory.extraction_model` — LLM for fact extraction (default: haiku)
+- `memory.validation_model` — LLM for grounding checks
+- `memory.enrichment_model` — LLM for metadata enrichment
+- `memory.auto_extract` — auto-extract facts after each turn
+- `memory.auto_inject` — auto-inject recalled facts into context
+- `memory.similarity_threshold` — minimum score for recall
+
 ## Configuration
 
 ### config

@@ -22,9 +22,30 @@ class TelegramConfig(BaseModel):
     )
 
 
+class WebConfig(BaseModel):
+    """Web UI channel configuration."""
+    enabled: bool = Field(
+        default=False,
+        json_schema_extra={"reload": "warm", "label": "Enable Web UI channel"},
+    )
+    host: str = Field(
+        default="0.0.0.0",
+        json_schema_extra={"reload": "warm", "label": "Web UI bind address"},
+    )
+    port: int = Field(
+        default=80,
+        json_schema_extra={"reload": "warm", "label": "Web UI port number"},
+    )
+    allow_from: list[str] = Field(
+        default_factory=list,
+        json_schema_extra={"reload": "warm", "label": "Allowed CIDR/IP ranges (empty = allow all)"},
+    )
+
+
 class ChannelsConfig(BaseModel):
     """Configuration for chat channels."""
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
+    web: WebConfig = Field(default_factory=WebConfig)
 
 
 OAUTH_SUPPORTED_PROVIDERS = {"anthropic", "gemini", "openai"}
@@ -198,6 +219,62 @@ class HeartbeatConfig(BaseModel):
     )
 
 
+class MemoryConfig(BaseModel):
+    """Semantic memory module configuration."""
+    enabled: bool = Field(
+        default=True,
+        json_schema_extra={"reload": "warm", "label": "Enable semantic memory (Layer 1)"},
+    )
+    database_url: str = Field(
+        default="postgresql://ragnarbot:ragnarbot@localhost:5432/ragnarbot",
+        json_schema_extra={"reload": "warm", "label": "PostgreSQL connection URL for pgvector"},
+    )
+    neo4j_url: str = Field(
+        default="bolt://localhost:7687",
+        json_schema_extra={"reload": "warm", "label": "Neo4j bolt connection URL"},
+    )
+    neo4j_user: str = Field(
+        default="neo4j",
+        json_schema_extra={"reload": "warm", "label": "Neo4j username"},
+    )
+    neo4j_password: str = Field(
+        default="ragnarbot",
+        json_schema_extra={"reload": "warm", "label": "Neo4j password"},
+    )
+    embedding_provider: str | None = Field(
+        default=None,
+        json_schema_extra={"reload": "warm", "label": "Embedding provider (ollama/voyage/litellm/auto)"},
+    )
+    embedding_model: str | None = Field(
+        default=None,
+        json_schema_extra={"reload": "warm", "label": "Embedding model name"},
+    )
+    extraction_model: str = Field(
+        default="anthropic/claude-haiku-4-5-20251001",
+        json_schema_extra={"reload": "hot", "label": "LLM model for fact extraction"},
+    )
+    validation_model: str = Field(
+        default="anthropic/claude-haiku-4-5-20251001",
+        json_schema_extra={"reload": "hot", "label": "LLM model for grounding validation"},
+    )
+    enrichment_model: str = Field(
+        default="anthropic/claude-haiku-4-5-20251001",
+        json_schema_extra={"reload": "hot", "label": "LLM model for metadata enrichment"},
+    )
+    auto_extract: bool = Field(
+        default=False,
+        json_schema_extra={"reload": "hot", "label": "Auto-extract facts after each turn"},
+    )
+    auto_inject: bool = Field(
+        default=True,
+        json_schema_extra={"reload": "hot", "label": "Auto-inject recalled facts into context"},
+    )
+    similarity_threshold: float = Field(
+        default=0.1,
+        json_schema_extra={"reload": "hot", "label": "Minimum similarity score for recall"},
+    )
+
+
 class Config(BaseSettings):
     """Root configuration for ragnarbot."""
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
@@ -205,6 +282,7 @@ class Config(BaseSettings):
     daemon: DaemonConfig = Field(default_factory=DaemonConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
+    memory: MemoryConfig = Field(default_factory=MemoryConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     transcription: TranscriptionConfig = Field(default_factory=TranscriptionConfig)
 

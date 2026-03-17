@@ -1,11 +1,16 @@
 """LiteLLM provider implementation for multi-provider support."""
 
+import asyncio
 import os
 from typing import Any
 
 import litellm
 from litellm import acompletion
 from loguru import logger
+
+MAX_RETRIES = 8
+RETRY_BASE_DELAY = 2  # seconds
+RETRY_MAX_DELAY = 60  # cap
 
 from ragnarbot.providers.base import DEFAULT_MAX_TOKENS, LLMProvider, LLMResponse, ToolCallRequest
 
@@ -115,32 +120,58 @@ class LiteLLMProvider(LLMProvider):
         if is_openrouter:
             kwargs["messages"] = self._adapt_tool_images(kwargs["messages"])
 
-        try:
-            response = await acompletion(**kwargs)
-            return self._parse_response(response)
-        except litellm.RateLimitError as e:
-            err_msg = str(e)
-            if "CachedContent" in err_msg and "FreeTier" in err_msg:
-                logger.warning("Gemini free tier does not support caching, retrying without cache")
-                kwargs["messages"] = self._strip_cache_control(kwargs["messages"])
-                try:
-                    response = await acompletion(**kwargs)
-                    return self._parse_response(response)
-                except Exception as retry_err:
-                    return LLMResponse(
-                        content=f"Error calling LLM: {str(retry_err)}",
-                        finish_reason="error",
-                    )
-            return LLMResponse(
-                content=f"Error calling LLM: {err_msg}",
-                finish_reason="error",
+        last_err: Exception | None = None
+        for attempt in range(1, MAX_RETRIES + 1):
+            try:
+                response = await acompletion(**kwargs)
+                return self._parse_response(response)
+            except litellm.RateLimitError as e:
+                err_msg = str(e)
+                # Gemini free tier cache issue — strip cache and retry once
+                if "CachedContent" in err_msg and "FreeTier" in err_msg:
+                    logger.warning("Gemini free tier does not support caching, retrying without cache")
+                    kwargs["messages"] = self._strip_cache_control(kwargs["messages"])
+                    try:
+                        response = await acompletion(**kwargs)
+                        return self._parse_response(response)
+                    except Exception as retry_err:
+                        return LLMResponse(
+                            content=f"Error calling LLM: {str(retry_err)}",
+                            finish_reason="error",
+                        )
+                last_err = e
+            except Exception as e:
+                last_err = e
+
+            logger.debug(
+                f"LLM error (attempt {attempt}): type={type(last_err).__name__}, "
+                f"retryable={self._is_retryable(last_err)}, err={str(last_err)[:200]}"
             )
-        except Exception as e:
-            return LLMResponse(
-                content=f"Error calling LLM: {str(e)}",
-                finish_reason="error",
+            if not self._is_retryable(last_err):
+                break
+
+            delay = min(RETRY_BASE_DELAY ** attempt, RETRY_MAX_DELAY)
+            logger.warning(
+                f"LLM request failed (attempt {attempt}/{MAX_RETRIES}), "
+                f"retrying in {delay}s: {last_err}"
             )
+            await asyncio.sleep(delay)
+
+        return LLMResponse(
+            content=f"Error calling LLM: {str(last_err)}",
+            finish_reason="error",
+        )
     
+    @staticmethod
+    def _is_retryable(err: Exception | None) -> bool:
+        """Check if an LLM error is transient and worth retrying."""
+        if err is None:
+            return False
+        if isinstance(err, (litellm.RateLimitError, litellm.ServiceUnavailableError)):
+            return True
+        err_str = str(err).lower()
+        return any(kw in err_str for kw in ("overloaded", "529", "rate limit", "too many requests"))
+
     @staticmethod
     def _sanitize_messages(messages: list[dict]) -> list[dict]:
         """Strip internal underscore-prefixed keys from content block dicts.

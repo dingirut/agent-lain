@@ -240,6 +240,31 @@ def gateway_main(
     cron_store_path = get_data_dir() / "cron" / "jobs.json"
     cron = CronService(cron_store_path)
 
+    # Create memory store (Layer 0 + optional Layer 1)
+    from ragnarbot.agent.memory.store import MemoryStore as SemanticMemoryStore
+    memory_cfg = config.memory
+    memory_store = SemanticMemoryStore(
+        workspace=config.workspace_path,
+        provider=provider if memory_cfg.enabled else None,
+        embedding_config={
+            "provider": memory_cfg.embedding_provider,
+            "model": memory_cfg.embedding_model,
+            "credentials": {
+                "voyage_api_key": getattr(creds.services, "voyage", None)
+                and creds.services.voyage.api_key or None,
+            },
+        } if memory_cfg.enabled else None,
+        database_url=memory_cfg.database_url,
+        neo4j_url=memory_cfg.neo4j_url,
+        neo4j_auth=(memory_cfg.neo4j_user, memory_cfg.neo4j_password),
+        extraction_model=memory_cfg.extraction_model,
+        validation_model=memory_cfg.validation_model,
+        enrichment_model=memory_cfg.enrichment_model,
+        auto_extract=memory_cfg.auto_extract,
+        auto_inject=memory_cfg.auto_inject,
+        similarity_threshold=memory_cfg.similarity_threshold,
+    ) if memory_cfg.enabled else None
+
     # Create agent with cron service
     agent = AgentLoop(
         bus=bus,
@@ -263,6 +288,7 @@ def gateway_main(
             model, auth_method, creds,
         ),
         browser_config=config.tools.browser,
+        memory_store=memory_store,
     )
 
     # Set cron callback (needs agent)
@@ -396,7 +422,13 @@ def gateway_main(
     )
 
     # Create channel manager
-    channels = ChannelManager(config, bus, creds, media_manager=media_manager)
+    channels = ChannelManager(
+        config, bus, creds,
+        media_manager=media_manager,
+        cron_service=cron,
+        heartbeat_service=heartbeat,
+        agent_loop=agent,
+    )
 
     if channels.enabled_channels:
         console.print(f"[green]✓[/green] Channels enabled: {', '.join(channels.enabled_channels)}")
@@ -501,18 +533,43 @@ def gateway_main(
                     console.print(f"[red]Config reload failed: {e}[/red]")
 
         try:
+            # Initialize semantic memory Layer 1 (non-blocking, optional)
+            if memory_store:
+                try:
+                    ok = await memory_store.initialize()
+                    if ok:
+                        console.print("[green]✓[/green] Semantic memory Layer 1 initialized")
+                    else:
+                        console.print("[yellow]⚠[/yellow] Semantic memory Layer 1 unavailable (files-only mode)")
+                except Exception as e:
+                    console.print(f"[yellow]⚠[/yellow] Semantic memory init failed: {e}")
+
             await cron.start()
             await heartbeat.start()
+
+            # Confidence decay loop (runs alongside heartbeat)
+            async def _decay_loop():
+                if not (memory_store and memory_store.has_vector):
+                    return
+                from ragnarbot.agent.memory.decay import ConfidenceDecayService
+                decay = ConfidenceDecayService(backend=memory_store._backend)
+                while True:
+                    await asyncio.sleep(config.heartbeat.interval_m * 60)
+                    try:
+                        await decay.run_decay()
+                    except Exception as e:
+                        logger.debug(f"Decay cycle error: {e}")
 
             agent_task = asyncio.create_task(agent.run())
             channel_task = asyncio.create_task(channels.start_all())
             reloader_task = asyncio.create_task(_config_reloader())
+            decay_task = asyncio.create_task(_decay_loop())
 
             # Wait for agent to finish (normal stop or restart request)
             await agent_task
 
             # Cancel other tasks
-            for task in [channel_task, reloader_task]:
+            for task in [channel_task, reloader_task, decay_task]:
                 task.cancel()
                 try:
                     await task
@@ -521,12 +578,16 @@ def gateway_main(
 
             # Cleanup
             await agent.browser_manager.close_all()
+            if memory_store:
+                await memory_store.close()
             heartbeat.stop()
             cron.stop()
             await channels.stop_all()
         except KeyboardInterrupt:
             console.print("\nShutting down...")
             await agent.browser_manager.close_all()
+            if memory_store:
+                await memory_store.close()
             heartbeat.stop()
             cron.stop()
             agent.stop()
@@ -813,6 +874,20 @@ def channels_status():
         "Telegram",
         "✓" if tg.enabled else "✗",
         tg_config
+    )
+
+    # Web UI
+    web = config.channels.web
+    web_hash = creds.channels.web.password_hash
+    web_config = f"port: {web.port}"
+    if web.allow_from:
+        web_config += f", allow: {', '.join(web.allow_from)}"
+    if not web_hash:
+        web_config = "[dim]not configured[/dim]"
+    table.add_row(
+        "Web UI",
+        "✓" if web.enabled else "✗",
+        web_config
     )
 
     console.print(table)

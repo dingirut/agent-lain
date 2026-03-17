@@ -13,6 +13,7 @@ from ragnarbot.cli.tui.screens import (
     token_input_screen,
     voice_transcription_screen,
     web_search_screen,
+    web_ui_screen,
 )
 from ragnarbot.config.providers import PROVIDERS, get_models, get_provider, supports_oauth
 
@@ -37,13 +38,16 @@ def _onboarding_loop(console: Console) -> None:
     token: str | None = None
     model_idx: int | None = None
     telegram_token: str | None = None
+    web_password: str = ""
+    web_allowed_ips: str = ""
     voice_provider: str = "none"
     voice_api_key: str = ""
     search_engine: str = "none"
     web_search_key: str = ""
     enable_daemon: bool | None = None
 
-    step = 1  # 1=provider, 2=auth, 3=token, 4=model, 5=telegram, 6=voice, 7=web_search, 8=daemon, 9=summary
+    # 1=provider, 2=auth, 3=token, 4=model, 5=telegram, 6=web_ui, 7=voice, 8=web_search, 9=daemon, 10=summary
+    step = 1
 
     while True:
         if step == 1:
@@ -101,36 +105,45 @@ def _onboarding_loop(console: Console) -> None:
             step = 6
 
         elif step == 6:
-            result = voice_transcription_screen(console)
-            if result is None:
+            web_ui_result = web_ui_screen(console)
+            if web_ui_result is None:
                 step = 5
                 continue
-            voice_provider, voice_api_key = result
+            web_password, web_allowed_ips = web_ui_result
             step = 7
 
         elif step == 7:
-            web_search_result = web_search_screen(console)
-            if web_search_result is None:
+            result = voice_transcription_screen(console)
+            if result is None:
                 step = 6
                 continue
-            search_engine, web_search_key = web_search_result
+            voice_provider, voice_api_key = result
             step = 8
 
         elif step == 8:
-            daemon_idx = daemon_screen(console)
-            if daemon_idx is None:
+            web_search_result = web_search_screen(console)
+            if web_search_result is None:
                 step = 7
                 continue
-            enable_daemon = daemon_idx == 0
+            search_engine, web_search_key = web_search_result
             step = 9
 
         elif step == 9:
+            daemon_idx = daemon_screen(console)
+            if daemon_idx is None:
+                step = 8
+                continue
+            enable_daemon = daemon_idx == 0
+            step = 10
+
+        elif step == 10:
             provider_id = PROVIDERS[provider_idx]["id"]
             provider = get_provider(provider_id)
             auth_method = "oauth" if auth_idx == 0 else "api_key"
             models = get_models(provider_id)
             model = models[model_idx]
             telegram_configured = bool(telegram_token)
+            web_ui_configured = bool(web_password)
 
             ok = summary_screen(
                 console,
@@ -141,9 +154,10 @@ def _onboarding_loop(console: Console) -> None:
                 enable_daemon=enable_daemon,
                 voice_provider=voice_provider,
                 search_engine=search_engine,
+                web_ui_configured=web_ui_configured,
             )
             if not ok:
-                step = 8
+                step = 9
                 continue
 
             # Save everything
@@ -159,6 +173,8 @@ def _onboarding_loop(console: Console) -> None:
                 voice_api_key=voice_api_key,
                 search_engine=search_engine,
                 web_search_key=web_search_key,
+                web_password=web_password if web_ui_configured else "",
+                web_allowed_ips=web_allowed_ips if web_ui_configured else "",
             )
             return
 
@@ -186,6 +202,8 @@ def _save_results(
     voice_api_key: str = "",
     search_engine: str = "none",
     web_search_key: str = "",
+    web_password: str = "",
+    web_allowed_ips: str = "",
 ) -> None:
     """Save onboarding results to config and credentials files."""
     from ragnarbot.auth.credentials import (
@@ -215,6 +233,14 @@ def _save_results(
     if search_engine != "none":
         config.tools.web.search.engine = search_engine
 
+    # Update web UI
+    if web_password:
+        config.channels.web.enabled = True
+        if web_allowed_ips:
+            config.channels.web.allow_from = [
+                ip.strip() for ip in web_allowed_ips.split(",") if ip.strip()
+            ]
+
     # Update daemon
     config.daemon.enabled = enable_daemon
 
@@ -231,6 +257,10 @@ def _save_results(
 
     if telegram_token:
         creds.channels.telegram.bot_token = telegram_token
+
+    if web_password:
+        from ragnarbot.web.auth import hash_password
+        creds.channels.web.password_hash = hash_password(web_password)
 
     if voice_api_key and voice_provider in ("groq", "elevenlabs"):
         getattr(creds.services, voice_provider).api_key = voice_api_key

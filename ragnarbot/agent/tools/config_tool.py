@@ -372,6 +372,29 @@ class ConfigTool(Tool):
                 agent._fallback_config.recovery_probe_interval = int(value)
             return "Fallback recovery probe interval updated."
 
+        # Memory config — hot reloadable fields
+        if path.startswith("memory.") and agent.memory_store:
+            field = path.split(".", 1)[1]
+            ms = agent.memory_store
+            if field == "extraction_model":
+                ms.reload_models(extraction_model=str(value))
+                return f"Memory extraction model updated to {value}."
+            if field == "validation_model":
+                ms.reload_models(validation_model=str(value))
+                return f"Memory validation model updated to {value}."
+            if field == "enrichment_model":
+                ms.reload_models(enrichment_model=str(value))
+                return f"Memory enrichment model updated to {value}."
+            if field == "auto_extract":
+                ms.auto_extract = bool(value) if isinstance(value, bool) else str(value).lower() in ("true", "1")
+                return "Memory auto_extract updated."
+            if field == "auto_inject":
+                ms.auto_inject = bool(value) if isinstance(value, bool) else str(value).lower() in ("true", "1")
+                return "Memory auto_inject updated."
+            if field == "similarity_threshold":
+                ms.similarity_threshold = float(value)
+                return "Memory similarity threshold updated."
+
         return None
 
     def _apply_warm_reload(self, path: str, value: Any) -> str | None:

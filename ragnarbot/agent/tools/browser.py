@@ -36,6 +36,45 @@ AGENT_PROFILE = Path.home() / ".ragnarbot" / "browser-profile"
 SCREENSHOT_DIR = Path.home() / ".ragnarbot" / "browser-screenshots"
 
 GOTO_TIMEOUT_MS = 30_000  # 30s navigation timeout
+SCREENSHOT_MAX_AGE = 3600  # prune screenshots older than 1 hour
+
+
+def _downscale_if_needed(img_bytes: bytes, max_dim: int = 7680) -> bytes:
+    """Downscale a PNG image if any dimension exceeds max_dim pixels.
+
+    Uses proportional scaling to keep aspect ratio. Returns original
+    bytes unchanged if both dimensions are within limits.
+    """
+    import io
+    try:
+        from PIL import Image
+        img = Image.open(io.BytesIO(img_bytes))
+        w, h = img.size
+        if w <= max_dim and h <= max_dim:
+            return img_bytes
+        scale = min(max_dim / w, max_dim / h)
+        new_w, new_h = int(w * scale), int(h * scale)
+        img = img.resize((new_w, new_h), Image.LANCZOS)
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        logger.debug(f"Screenshot downscaled from {w}x{h} to {new_w}x{new_h}")
+        return buf.getvalue()
+    except Exception as e:
+        logger.warning(f"Failed to downscale screenshot: {e}")
+        return img_bytes
+
+
+def _prune_old_screenshots() -> None:
+    """Remove screenshots older than SCREENSHOT_MAX_AGE seconds."""
+    if not SCREENSHOT_DIR.exists():
+        return
+    cutoff = time.time() - SCREENSHOT_MAX_AGE
+    for f in SCREENSHOT_DIR.iterdir():
+        try:
+            if f.is_file() and f.stat().st_mtime < cutoff:
+                f.unlink(missing_ok=True)
+        except Exception:
+            pass
 
 
 def _build_brand_header(major: str) -> str:
@@ -174,6 +213,9 @@ class BrowserSessionManager:
         url: str | None = None,
         headless: bool | None = None,
     ) -> str:
+        # Prune old screenshots on session open
+        _prune_old_screenshots()
+
         # Reuse existing session if one is already open
         if self._sessions:
             session = next(iter(self._sessions.values()))
@@ -290,12 +332,9 @@ class BrowserSessionManager:
             return f"No session '{session_id}' to close."
         if session.idle_task and not session.idle_task.done():
             session.idle_task.cancel()
-        # Clean up screenshots saved during this session
-        for p in session._screenshot_paths:
-            try:
-                p.unlink(missing_ok=True)
-            except Exception:
-                pass
+        # Screenshots are kept on disk so they can be sent to the user
+        # even after the browser session is closed. Old files are pruned
+        # on the next session open (see _prune_old_screenshots).
         try:
             if session._browser:
                 await session._browser.close()
@@ -416,6 +455,9 @@ class BrowserSessionManager:
             img_bytes = await session.page.locator(selector).screenshot()
         else:
             img_bytes = await session.page.screenshot(full_page=full_page)
+
+        # Downscale if any dimension exceeds the LLM vision limit (8000px)
+        img_bytes = _downscale_if_needed(img_bytes, max_dim=7680)
 
         # Save to disk so the agent can send the file to the user
         SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
