@@ -187,8 +187,28 @@ class MemoryStore:
 
     # ── Layer 0: File-based memory ──────────────────────────────────
 
+    def get_day_file(self, date_str: str) -> Path:
+        """Get path to a daily memory file."""
+        return self.memory_dir / f"{date_str}.md"
+
     def get_today_file(self) -> Path:
-        return self.memory_dir / f"{today_date()}.md"
+        return self.get_day_file(today_date())
+
+    def get_yesterday_file(self) -> Path:
+        from datetime import datetime, timedelta
+        yesterday = (datetime.now().date() - timedelta(days=1)).strftime("%Y-%m-%d")
+        return self.get_day_file(yesterday)
+
+    def read_day(self, date_str: str) -> str:
+        """Read a daily memory file."""
+        day_file = self.get_day_file(date_str)
+        if day_file.exists():
+            return day_file.read_text(encoding="utf-8")
+        return ""
+
+    def write_day(self, date_str: str, content: str) -> None:
+        """Write the full contents of a daily memory file."""
+        self.get_day_file(date_str).write_text(content, encoding="utf-8")
 
     def read_today(self) -> str:
         today_file = self.get_today_file()
@@ -243,6 +263,9 @@ class MemoryStore:
         today = self.read_today()
         if today:
             parts.append("## Today's Notes\n" + today)
+        yesterday = self.read_day(self.get_yesterday_file().stem)
+        if yesterday:
+            parts.append("## Yesterday's Notes\n" + yesterday)
         return "\n\n".join(parts) if parts else ""
 
     # ── Layer 1: Vector memory ──────────────────────────────────────

@@ -98,6 +98,7 @@ class TestOnboardingFlow:
             (Key.ENTER, ""),         # Confirm key
             (Key.ENTER, ""),         # Select first model (Opus)
             (Key.ENTER, ""),         # Skip telegram (empty enter)
+            (Key.ENTER, ""),         # Skip web UI (empty enter)
             (Key.DOWN, ""),          # Voice: past ElevenLabs
             (Key.DOWN, ""),          # Voice: to Skip
             (Key.ENTER, ""),         # Select Skip
@@ -127,6 +128,7 @@ class TestOnboardingFlow:
             (Key.DOWN, ""),         # Navigate to Sonnet
             (Key.ENTER, ""),        # Select Sonnet
             (Key.ENTER, ""),        # Skip telegram
+            (Key.ENTER, ""),        # Skip web UI
             (Key.DOWN, ""),         # Voice: past ElevenLabs
             (Key.DOWN, ""),         # Voice: to Skip
             (Key.ENTER, ""),        # Select Skip
@@ -155,6 +157,7 @@ class TestOnboardingFlow:
             (Key.ENTER, ""),        # Confirm key
             (Key.ENTER, ""),        # Select first model (GPT-5.4)
             (Key.ENTER, ""),        # Skip telegram
+            (Key.ENTER, ""),        # Skip web UI
             (Key.DOWN, ""),         # Voice: past ElevenLabs
             (Key.DOWN, ""),         # Voice: to Skip
             (Key.ENTER, ""),        # Select Skip
@@ -186,6 +189,7 @@ class TestOnboardingFlow:
             (Key.DOWN, ""),         # Navigate to Flash
             (Key.ENTER, ""),        # Select Flash
             (Key.ENTER, ""),        # Skip telegram
+            (Key.ENTER, ""),        # Skip web UI
             (Key.DOWN, ""),         # Voice: past ElevenLabs
             (Key.DOWN, ""),         # Voice: to Skip
             (Key.ENTER, ""),        # Select Skip
@@ -214,6 +218,7 @@ class TestOnboardingFlow:
             (Key.ENTER, ""),        # Confirm key
             (Key.ENTER, ""),        # Select first model
             (Key.ENTER, ""),        # Skip telegram
+            (Key.ENTER, ""),        # Skip web UI
             (Key.DOWN, ""),         # Voice: past ElevenLabs
             (Key.DOWN, ""),         # Voice: to Skip
             (Key.ENTER, ""),        # Select Skip
@@ -286,6 +291,7 @@ class TestTelegramValidation:
             *[(Key.CHAR, c) for c in "123456:ABC-DEF"],
             (Key.ENTER, ""),        # Submit token
             (Key.ENTER, ""),        # Accept bot info screen
+            (Key.ENTER, ""),        # Skip web UI
             (Key.DOWN, ""),         # Voice: past ElevenLabs
             (Key.DOWN, ""),         # Voice: to Skip
             (Key.ENTER, ""),        # Select Skip
@@ -355,6 +361,7 @@ class TestVoiceTranscriptionOnboarding:
             (Key.ENTER, ""),        # Confirm key
             (Key.ENTER, ""),        # Select first model
             (Key.ENTER, ""),        # Skip telegram
+            (Key.ENTER, ""),        # Skip web UI
             (Key.DOWN, ""),         # Voice: past ElevenLabs to Groq
             (Key.ENTER, ""),        # Select Groq
             *[(Key.CHAR, c) for c in "gsk-groq-key"],
@@ -382,6 +389,7 @@ class TestVoiceTranscriptionOnboarding:
             (Key.ENTER, ""),        # Confirm key
             (Key.ENTER, ""),        # Select first model
             (Key.ENTER, ""),        # Skip telegram
+            (Key.ENTER, ""),        # Skip web UI
             (Key.DOWN, ""),         # Voice: past ElevenLabs
             (Key.DOWN, ""),         # Voice: to Skip
             (Key.ENTER, ""),        # Select Skip
@@ -410,6 +418,7 @@ class TestVoiceTranscriptionOnboarding:
             (Key.ENTER, ""),        # Confirm key
             (Key.ENTER, ""),        # Select first model
             (Key.ENTER, ""),        # Skip telegram
+            (Key.ENTER, ""),        # Skip web UI
             (Key.DOWN, ""),         # Voice: past ElevenLabs
             (Key.DOWN, ""),         # Voice: to Skip
             (Key.ENTER, ""),        # Select Skip
@@ -434,6 +443,7 @@ class TestVoiceTranscriptionOnboarding:
             (Key.ENTER, ""),        # Confirm key
             (Key.ENTER, ""),        # Select first model
             (Key.ENTER, ""),        # Skip telegram
+            (Key.ENTER, ""),        # Skip web UI
             (Key.DOWN, ""),         # Voice: past ElevenLabs
             (Key.DOWN, ""),         # Voice: to Skip
             (Key.ENTER, ""),        # Select Skip

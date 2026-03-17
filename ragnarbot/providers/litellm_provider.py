@@ -167,7 +167,9 @@ class LiteLLMProvider(LLMProvider):
         """Check if an LLM error is transient and worth retrying."""
         if err is None:
             return False
-        if isinstance(err, (litellm.RateLimitError, litellm.ServiceUnavailableError)):
+        if isinstance(err, litellm.RateLimitError):
+            return False  # RateLimitError handled separately (Gemini cache retry)
+        if isinstance(err, litellm.ServiceUnavailableError):
             return True
         err_str = str(err).lower()
         return any(kw in err_str for kw in ("overloaded", "529", "rate limit", "too many requests"))
