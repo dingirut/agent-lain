@@ -622,6 +622,20 @@ function SecuritySection() {
               Disable protection
             </Button>
           )}
+          {enabled && (
+            <Button
+              variant="secondary"
+              onClick={async () => {
+                try {
+                  await api.post('/api/auth/logout')
+                } finally {
+                  location.reload()
+                }
+              }}
+            >
+              Sign out on this device
+            </Button>
+          )}
         </div>
         {notice && <div className="text-[11px] text-ok">{notice}</div>}
         {error && <div className="text-[11px] text-err">{error}</div>}

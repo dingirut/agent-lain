@@ -36,8 +36,25 @@ function navColors(active: boolean) {
 
 // ── desktop sidebar ──────────────────────────────────────────
 
+export function useConsoleLock() {
+  const { data } = useQuery({
+    queryKey: ['auth-status'],
+    queryFn: () => api.get<{ protected: boolean }>('/api/auth/status'),
+    staleTime: 60_000,
+  })
+  const lock = async () => {
+    try {
+      await api.post('/api/auth/logout')
+    } finally {
+      location.reload()
+    }
+  }
+  return { protected: !!data?.protected, lock }
+}
+
 export function Sidebar({ version }: { version: string }) {
   const location = useLocation()
+  const consoleLock = useConsoleLock()
   return (
     <div className="hidden lg:flex w-[212px] min-w-[212px] flex-col border-r border-line bg-panel">
       <div className="flex items-center gap-2 px-4 pb-3 pt-[18px]">
@@ -62,6 +79,18 @@ export function Sidebar({ version }: { version: string }) {
           )
         })}
       </nav>
+      {consoleLock.protected && (
+        <div className="mt-auto border-t border-line p-2">
+          <button
+            onClick={consoleLock.lock}
+            className="flex w-full items-center gap-[11px] rounded-[3px] px-2.5 py-2 text-soft hover:bg-raised2/60 hover:text-ink"
+            title="Sign out and show the password screen"
+          >
+            <PixelIcon px={NAV_PX.Lock} on="rgb(var(--rb-soft) / .7)" />
+            <span className="text-[13px] font-medium tracking-[0.1px]">Lock console</span>
+          </button>
+        </div>
+      )}
     </div>
   )
 }
@@ -103,6 +132,7 @@ export function TabBar({ onMore }: { onMore: () => void }) {
 
 export function MoreSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   const navigate = useNavigate()
+  const consoleLock = useConsoleLock()
   if (!open) return null
   const items = NAV_ITEMS.filter((i) => !['Chat', 'Files', 'Skills'].includes(i.label))
   return (
@@ -125,6 +155,15 @@ export function MoreSheet({ open, onClose }: { open: boolean; onClose: () => voi
             <span className="text-[13px] font-medium text-mist">{item.label}</span>
           </button>
         ))}
+        {consoleLock.protected && (
+          <button
+            onClick={consoleLock.lock}
+            className="mt-1 flex w-full items-center gap-3 rounded-[3px] border-t border-line px-3 py-3 text-left hover:bg-raised2"
+          >
+            <PixelIcon px={NAV_PX.Lock} on="rgb(var(--rb-soft))" />
+            <span className="text-[13px] font-medium text-mist">Lock console</span>
+          </button>
+        )}
       </div>
     </div>
   )

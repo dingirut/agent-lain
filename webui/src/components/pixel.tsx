@@ -14,6 +14,7 @@ export const NAV_PX: Record<string, number[]> = {
   Settings: [1, 0, 1, 0, 1, 0, 1, 0, 1],
   More: [0, 0, 0, 1, 1, 1, 0, 0, 0],
   Bell: [0, 1, 0, 1, 1, 1, 1, 1, 1],
+  Lock: [1, 0, 1, 1, 1, 1, 1, 1, 1],
 }
 
 export const CHAT_ACTION_PX = {
