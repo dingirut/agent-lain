@@ -161,7 +161,9 @@ class ApiRoutes:
         api_key_urls = {p["id"]: p.get("api_key_url", "") for p in PROVIDERS}
         entries = []
         for path, value in sorted(get_all_paths(creds).items()):
-            if path.startswith("extra"):
+            # extra is listed separately; web.* is auth machinery (hash/secret),
+            # managed exclusively through /api/auth.
+            if path.startswith(("extra", "web.")):
                 continue
             entry = {"path": path, "set": bool(value)}
             parts = path.split(".")
@@ -178,6 +180,8 @@ class ApiRoutes:
             return _json_error("path and value are required")
         if not path.startswith("secrets."):
             path = f"secrets.{path}"
+        if path.startswith("secrets.web."):
+            return _json_error("web console auth is managed via Settings → Security", 403)
         return await self._config_tool_set(path, value)
 
     # ── models & providers ───────────────────────────────────────

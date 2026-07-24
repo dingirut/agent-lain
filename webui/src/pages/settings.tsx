@@ -71,6 +71,7 @@ export default function SettingsPage() {
         <span className="font-mono text-[10px] text-muted">{unsetSecrets} unset</span>
       ) : undefined,
     },
+    { id: 'security', title: 'Security' },
     { id: 'appearance', title: 'Appearance' },
     { id: 'experimental', title: 'Experimental', divider: true },
     { id: 'integrations', title: 'Integrations' },
@@ -82,6 +83,7 @@ export default function SettingsPage() {
 
   const renderSection = (id: string) => {
     if (id === 'secrets') return <SecretsSection data={secrets} qc={qc} />
+    if (id === 'security') return <SecuritySection />
     if (id === 'appearance') return <AppearanceSection />
     if (id === 'experimental') return <SoulSection field={config?.[0]} />
     if (id === 'integrations') return <IntegrationsSection onOpenHooks={() => navigate('/hooks')} />
@@ -504,6 +506,139 @@ function CustomSecrets({
           </button>
         )}
       </div>
+    </div>
+  )
+}
+
+// ── security ─────────────────────────────────────────────────
+
+function SecuritySection() {
+  const qc = useQueryClient()
+  const { data: auth } = useQuery({
+    queryKey: ['auth-status'],
+    queryFn: () => api.get<{ protected: boolean }>('/api/auth/status'),
+  })
+  const [current, setCurrent] = useState('')
+  const [next, setNext] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [confirmDisable, setConfirmDisable] = useState(false)
+  const [notice, setNotice] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const reset = () => {
+    setCurrent('')
+    setNext('')
+    setConfirm('')
+    qc.invalidateQueries({ queryKey: ['auth-status'] })
+  }
+
+  const save = useMutation({
+    mutationFn: (body: { current_password?: string; new_password: string }) =>
+      api.post('/api/auth/password', body),
+    onSuccess: (_data, vars) => {
+      reset()
+      setError(null)
+      setNotice(
+        vars.new_password
+          ? 'Пароль установлен. Все остальные сессии разлогинены.'
+          : 'Защита паролем выключена.',
+      )
+    },
+    onError: (e) => {
+      setNotice(null)
+      setError((e as ApiError)?.message ?? 'Не получилось.')
+    },
+  })
+
+  if (!auth) return <Skeleton className="w-1/2" />
+  const enabled = auth.protected
+  const mismatch = next.length > 0 && confirm.length > 0 && next !== confirm
+
+  return (
+    <div className="space-y-3">
+      <Card className="space-y-3">
+        <div className="flex items-center gap-2">
+          <Dot color={enabled ? 'ok' : 'muted'} />
+          <div className="text-[13px] font-semibold text-ink">
+            Password protection {enabled ? 'enabled' : 'disabled'}
+          </div>
+        </div>
+        <p className="text-[11px] leading-relaxed text-soft">
+          Пароль закрывает API и чат веб-консоли (cookie-сессия на 30 дней). Полезно, если консоль
+          доступна из общей сети. Telegram-доступ бота это не затрагивает.
+        </p>
+
+        <div className="flex max-w-[320px] flex-col gap-2">
+          {enabled && (
+            <TextInput
+              type="password"
+              autoComplete="current-password"
+              aria-label="Current password"
+              placeholder="Текущий пароль"
+              value={current}
+              onChange={(e) => setCurrent(e.target.value)}
+              className="font-mono"
+            />
+          )}
+          <TextInput
+            type="password"
+            autoComplete="new-password"
+            aria-label="New password"
+            placeholder={enabled ? 'Новый пароль (мин. 6 символов)' : 'Пароль (мин. 6 символов)'}
+            value={next}
+            onChange={(e) => setNext(e.target.value)}
+            className="font-mono"
+          />
+          <TextInput
+            type="password"
+            autoComplete="new-password"
+            aria-label="Confirm new password"
+            placeholder="Повтори пароль"
+            value={confirm}
+            error={mismatch}
+            onChange={(e) => setConfirm(e.target.value)}
+            className="font-mono"
+          />
+          {mismatch && <div className="text-[10.5px] text-err">Пароли не совпадают.</div>}
+        </div>
+
+        <div className="flex flex-wrap gap-2 pt-1">
+          <Button
+            variant="primary"
+            loading={save.isPending}
+            disabled={
+              !next || next.length < 6 || next !== confirm || (enabled && !current)
+            }
+            onClick={() => save.mutate({ current_password: current, new_password: next })}
+          >
+            {enabled ? 'Сменить пароль' : 'Установить пароль'}
+          </Button>
+          {enabled && (
+            <Button
+              variant="destructive"
+              disabled={!current || save.isPending}
+              onClick={() => setConfirmDisable(true)}
+            >
+              Выключить защиту
+            </Button>
+          )}
+        </div>
+        {notice && <div className="text-[11px] text-ok">{notice}</div>}
+        {error && <div className="text-[11px] text-err">{error}</div>}
+      </Card>
+
+      <ConfirmDialog
+        open={confirmDisable}
+        title="Выключить защиту паролем?"
+        body="Консоль снова станет доступна всем, кто видит её порт в сети."
+        confirmLabel="Выключить"
+        destructive
+        onConfirm={() => {
+          save.mutate({ current_password: current, new_password: '' })
+          setConfirmDisable(false)
+        }}
+        onCancel={() => setConfirmDisable(false)}
+      />
     </div>
   )
 }

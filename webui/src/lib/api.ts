@@ -16,6 +16,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const isJson = res.headers.get('content-type')?.includes('application/json')
   const data = isJson ? await res.json() : await res.text()
   if (!res.ok) {
+    // Session expired or console got protected — surface the login gate.
+    if (res.status === 401 && !path.startsWith('/api/auth/')) {
+      window.dispatchEvent(new CustomEvent('rb-unauthorized'))
+    }
     const message = isJson && data?.error ? data.error : `HTTP ${res.status}`
     throw new ApiError(message, res.status)
   }

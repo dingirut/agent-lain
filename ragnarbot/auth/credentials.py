@@ -45,11 +45,18 @@ class ChannelsCredentials(BaseModel):
     telegram: ChannelCredential = Field(default_factory=ChannelCredential)
 
 
+class WebCredential(BaseModel):
+    """Web console password protection (managed via /api/auth, not secrets)."""
+    password_hash: str = ""
+    session_secret: str = ""
+
+
 class Credentials(BaseModel):
     """Root credentials model. Stored in the active profile root with 0o600."""
     providers: ProvidersCredentials = Field(default_factory=ProvidersCredentials)
     services: ServicesCredentials = Field(default_factory=ServicesCredentials)
     channels: ChannelsCredentials = Field(default_factory=ChannelsCredentials)
+    web: WebCredential = Field(default_factory=WebCredential)
     extra: dict[str, str] = Field(default_factory=dict)
 
 

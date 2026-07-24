@@ -159,7 +159,14 @@ class WebServer:
                 return result
             media_manager.register_download_callback("web", _download)
 
-        self.app = web.Application(client_max_size=64 * 1024 * 1024)
+        from ragnarbot.web.auth import WebAuth, auth_middleware
+
+        self.auth = WebAuth()
+        self.app = web.Application(
+            client_max_size=64 * 1024 * 1024,
+            middlewares=[auth_middleware],
+        )
+        self.app["rb_auth"] = self.auth
         self._setup_routes()
 
     # ── lifecycle ────────────────────────────────────────────────
@@ -195,6 +202,11 @@ class WebServer:
         r = self.app.router
         r.add_get("/ws", self._handle_ws)
         r.add_get("/api/status", self._handle_status)
+
+        r.add_get("/api/auth/status", self._handle_auth_status)
+        r.add_post("/api/auth/login", self._handle_auth_login)
+        r.add_post("/api/auth/logout", self._handle_auth_logout)
+        r.add_post("/api/auth/password", self._handle_auth_password)
 
         ApiRoutes(self).register(r)
 
@@ -275,6 +287,66 @@ class WebServer:
             "model": self.agent.model,
             "web_clients": self.channel.client_count,
         })
+
+    # ── REST: auth ───────────────────────────────────────────────
+
+    async def _handle_auth_status(self, request: web.Request) -> web.Response:
+        return web.json_response({
+            "protected": self.auth.enabled,
+            "authenticated": not self.auth.enabled or self.auth.authenticated(request),
+        })
+
+    async def _handle_auth_login(self, request: web.Request) -> web.Response:
+        body = await request.json()
+        password = str(body.get("password") or "")
+        if not self.auth.enabled:
+            return web.json_response({"ok": True})
+        remote = request.headers.get("X-Forwarded-For", request.remote or "?").split(",")[0].strip()
+        if not self.auth.check_login(password, remote):
+            return web.json_response({"error": "wrong password"}, status=401)
+        response = web.json_response({"ok": True})
+        self.auth.issue_cookie(response)
+        return response
+
+    async def _handle_auth_logout(self, request: web.Request) -> web.Response:
+        response = web.json_response({"ok": True})
+        self.auth.clear_cookie(response)
+        return response
+
+    async def _handle_auth_password(self, request: web.Request) -> web.Response:
+        """Set, change, or disable the console password.
+
+        Requires the current password whenever one is set (defense in depth on
+        top of the session cookie the middleware already demanded).
+        """
+        from ragnarbot.web.auth import MIN_PASSWORD_LEN
+
+        body = await request.json()
+        current = str(body.get("current_password") or "")
+        new = str(body.get("new_password") or "")
+
+        if self.auth.enabled:
+            from ragnarbot.web.auth import verify_password
+            if not verify_password(current, self.auth.password_hash):
+                return web.json_response({"error": "current password is wrong"}, status=403)
+
+        if not new:  # disable protection
+            if not self.auth.enabled:
+                return web.json_response({"error": "protection is not enabled"}, status=400)
+            self.auth.disable()
+            response = web.json_response({"ok": True, "protected": False})
+            self.auth.clear_cookie(response)
+            return response
+
+        if len(new) < MIN_PASSWORD_LEN:
+            return web.json_response(
+                {"error": f"password must be at least {MIN_PASSWORD_LEN} characters"}, status=400
+            )
+        self.auth.set_password(new)
+        # Secret rotation logged out every session — keep this one alive.
+        response = web.json_response({"ok": True, "protected": True})
+        self.auth.issue_cookie(response)
+        return response
 
     # ── REST: uploads / voice / media ────────────────────────────
 

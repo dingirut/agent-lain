@@ -15,6 +15,7 @@ import {
 import { Skeleton, Toast } from './components/ui'
 import { api } from './lib/api'
 
+const LoginGate = lazy(() => import('./app/login'))
 const ChatPage = lazy(() => import('./pages/chat'))
 const FilesPage = lazy(() => import('./pages/memory'))
 const SettingsPage = lazy(() => import('./pages/settings'))
@@ -42,6 +43,7 @@ export default function App() {
   const [more, setMore] = useState(false)
   const [bell, setBell] = useState(false)
   const [chats, setChats] = useState(false)
+  const [locked, setLocked] = useState<boolean | null>(null)
   const location = useLocation()
   const toast = useChat((s) => s.toast)
   const setToast = useChat((s) => s.setToast)
@@ -50,6 +52,17 @@ export default function App() {
 
   useEffect(() => {
     initTheme()
+    const onUnauthorized = () => setLocked(true)
+    window.addEventListener('rb-unauthorized', onUnauthorized)
+    api
+      .get<{ protected: boolean; authenticated: boolean }>('/api/auth/status')
+      .then((d) => setLocked(d.protected && !d.authenticated))
+      .catch(() => setLocked(false))
+    return () => window.removeEventListener('rb-unauthorized', onUnauthorized)
+  }, [])
+
+  useEffect(() => {
+    if (locked !== false) return
     const disconnect = connectWs()
     api
       .get<{ version: string }>('/api/status')
@@ -60,7 +73,20 @@ export default function App() {
       .then((d) => setUnread(d.unread))
       .catch(() => {})
     return disconnect
-  }, [setUnread])
+  }, [setUnread, locked])
+
+  if (locked === null) {
+    return <div className="h-dvh bg-page" />
+  }
+  if (locked) {
+    return (
+      <QueryClientProvider client={queryClient}>
+        <Suspense fallback={<div className="h-dvh bg-page" />}>
+          <LoginGate />
+        </Suspense>
+      </QueryClientProvider>
+    )
+  }
 
   const current =
     NAV_ITEMS.find((i) =>
