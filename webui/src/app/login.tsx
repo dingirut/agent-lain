@@ -24,10 +24,10 @@ export default function LoginGate() {
       const apiErr = err as ApiError
       setError(
         apiErr?.status === 429
-          ? 'Слишком много попыток — подожди минуту.'
+          ? 'Too many attempts — wait a minute.'
           : apiErr?.status === 401
-            ? 'Неверный пароль.'
-            : apiErr?.message || 'Не удалось войти.',
+            ? 'Wrong password.'
+            : apiErr?.message || 'Login failed.',
       )
       setBusy(false)
     }
@@ -42,7 +42,7 @@ export default function LoginGate() {
           type="password"
           autoComplete="current-password"
           aria-label="Console password"
-          placeholder="Пароль консоли"
+          placeholder="Console password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           error={!!error}
@@ -50,7 +50,7 @@ export default function LoginGate() {
         />
         {error && <div className="text-center text-[11.5px] text-err">{error}</div>}
         <Button variant="primary" type="submit" loading={busy} disabled={!password}>
-          Войти
+          Sign in
         </Button>
       </form>
       <div className="font-mono text-[9.5px] text-faint">web console is password protected</div>

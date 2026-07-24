@@ -540,13 +540,13 @@ function SecuritySection() {
       setError(null)
       setNotice(
         vars.new_password
-          ? 'Пароль установлен. Все остальные сессии разлогинены.'
-          : 'Защита паролем выключена.',
+          ? 'Password saved. All other sessions were signed out.'
+          : 'Password protection disabled.',
       )
     },
     onError: (e) => {
       setNotice(null)
-      setError((e as ApiError)?.message ?? 'Не получилось.')
+      setError((e as ApiError)?.message ?? 'Something went wrong.')
     },
   })
 
@@ -564,8 +564,8 @@ function SecuritySection() {
           </div>
         </div>
         <p className="text-[11px] leading-relaxed text-soft">
-          Пароль закрывает API и чат веб-консоли (cookie-сессия на 30 дней). Полезно, если консоль
-          доступна из общей сети. Telegram-доступ бота это не затрагивает.
+          Locks the console API and chat behind a password (30-day cookie session). Useful when the
+          console is reachable from a shared network. The bot's Telegram access is unaffected.
         </p>
 
         <div className="flex max-w-[320px] flex-col gap-2">
@@ -574,7 +574,7 @@ function SecuritySection() {
               type="password"
               autoComplete="current-password"
               aria-label="Current password"
-              placeholder="Текущий пароль"
+              placeholder="Current password"
               value={current}
               onChange={(e) => setCurrent(e.target.value)}
               className="font-mono"
@@ -584,7 +584,7 @@ function SecuritySection() {
             type="password"
             autoComplete="new-password"
             aria-label="New password"
-            placeholder={enabled ? 'Новый пароль (мин. 6 символов)' : 'Пароль (мин. 6 символов)'}
+            placeholder={enabled ? 'New password (min. 6 characters)' : 'Password (min. 6 characters)'}
             value={next}
             onChange={(e) => setNext(e.target.value)}
             className="font-mono"
@@ -593,13 +593,13 @@ function SecuritySection() {
             type="password"
             autoComplete="new-password"
             aria-label="Confirm new password"
-            placeholder="Повтори пароль"
+            placeholder="Repeat password"
             value={confirm}
             error={mismatch}
             onChange={(e) => setConfirm(e.target.value)}
             className="font-mono"
           />
-          {mismatch && <div className="text-[10.5px] text-err">Пароли не совпадают.</div>}
+          {mismatch && <div className="text-[10.5px] text-err">Passwords do not match.</div>}
         </div>
 
         <div className="flex flex-wrap gap-2 pt-1">
@@ -611,7 +611,7 @@ function SecuritySection() {
             }
             onClick={() => save.mutate({ current_password: current, new_password: next })}
           >
-            {enabled ? 'Сменить пароль' : 'Установить пароль'}
+            {enabled ? 'Change password' : 'Set password'}
           </Button>
           {enabled && (
             <Button
@@ -619,7 +619,7 @@ function SecuritySection() {
               disabled={!current || save.isPending}
               onClick={() => setConfirmDisable(true)}
             >
-              Выключить защиту
+              Disable protection
             </Button>
           )}
         </div>
@@ -629,9 +629,9 @@ function SecuritySection() {
 
       <ConfirmDialog
         open={confirmDisable}
-        title="Выключить защиту паролем?"
-        body="Консоль снова станет доступна всем, кто видит её порт в сети."
-        confirmLabel="Выключить"
+        title="Disable password protection?"
+        body="The console becomes reachable again by anyone who can see its port."
+        confirmLabel="Disable"
         destructive
         onConfirm={() => {
           save.mutate({ current_password: current, new_password: '' })
