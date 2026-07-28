@@ -1591,7 +1591,12 @@ export default function ChatPage({
       history &&
       s.sessionId &&
       history.session_id === s.sessionId &&
-      appliedHistoryRef.current !== dataUpdatedAt
+      appliedHistoryRef.current !== dataUpdatedAt &&
+      // A finalized reply still typing (or held by a text selection) is not
+      // in `messages` yet, but the server copy IS in this fetch — applying
+      // now would show the reply twice. Once the commit clears the live
+      // turn, this effect re-runs and reconciles with the server copy.
+      !s.liveTurn?.finalMessage
     ) {
       // Apply even while a turn is streaming — after a mid-turn refresh the
       // page must show prior history under the live turn. The only guard:
@@ -1604,7 +1609,7 @@ export default function ChatPage({
         useChat.setState({ messages: history.messages, sessionTitle: history.title })
       }
     }
-  }, [history, dataUpdatedAt, s.sessionId, s.processing])
+  }, [history, dataUpdatedAt, s.sessionId, s.processing, s.liveTurn])
 
   // The server persists the session a couple of seconds after turn_ended, so
   // refetch shortly after a turn settles to reconcile with what was saved.

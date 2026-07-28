@@ -196,18 +196,25 @@ function turnFromSnapshot(raw: any): LiveTurn {
   }
 }
 
+function committedMessages(state: ChatState): ChatMessage[] {
+  const turn = state.liveTurn!
+  const final = turn.finalMessage!
+  // The post-turn history reconcile can deliver the server copy of this reply
+  // before the dwell/selection-deferred commit runs — replace it instead of
+  // appending a duplicate.
+  let base = state.messages
+  const last = base[base.length - 1]
+  if (last && last.role === 'assistant' && last.content === final.content) {
+    base = base.slice(0, -1)
+  }
+  return [...base, ...(turn.pendingUsers ?? []), final]
+}
+
 function commitPendingTurn(state: ChatState): Pick<ChatState, 'messages' | 'liveTurn'> {
   if (!state.liveTurn?.finalMessage) {
     return { messages: state.messages, liveTurn: state.liveTurn }
   }
-  return {
-    messages: [
-      ...state.messages,
-      ...(state.liveTurn.pendingUsers ?? []),
-      state.liveTurn.finalMessage,
-    ],
-    liveTurn: null,
-  }
+  return { messages: committedMessages(state), liveTurn: null }
 }
 
 export const useChat = create<ChatState>((set, get) => ({
@@ -240,15 +247,7 @@ export const useChat = create<ChatState>((set, get) => ({
   setToast: (t) => set({ toast: t }),
   commitLiveTurn: () => set((s) => {
     if (!s.liveTurn?.finalMessage) return s
-    return {
-      messages: [
-        ...s.messages,
-        ...(s.liveTurn.pendingUsers ?? []),
-        s.liveTurn.finalMessage,
-      ],
-      liveTurn: null,
-      processing: false,
-    }
+    return { messages: committedMessages(s), liveTurn: null, processing: false }
   }),
 }))
 
