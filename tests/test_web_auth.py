@@ -180,3 +180,36 @@ def test_login_endpoint():
         assert COOKIE_NAME in resp.cookies
 
     asyncio.run(go())
+
+
+def test_autolock_endpoint():
+    async def go():
+        server = make_server()
+
+        # requires protection to be enabled
+        resp = await server._handle_auth_autolock(JsonRequest(body={"minutes": 10}))
+        assert resp.status == 400
+
+        server.auth.set_password("secret-1")
+
+        resp = await server._handle_auth_autolock(JsonRequest(body={"minutes": 15}))
+        assert json.loads(resp.text)["auto_lock_minutes"] == 15
+        assert load_credentials().web.auto_lock_minutes == 15
+
+        # validation: range and type
+        resp = await server._handle_auth_autolock(JsonRequest(body={"minutes": -1}))
+        assert resp.status == 400
+        resp = await server._handle_auth_autolock(JsonRequest(body={"minutes": 2000}))
+        assert resp.status == 400
+        resp = await server._handle_auth_autolock(JsonRequest(body={"minutes": "abc"}))
+        assert resp.status == 400
+        assert server.auth.auto_lock_minutes == 15
+
+        # 0 turns it off; disabling protection resets it too
+        resp = await server._handle_auth_autolock(JsonRequest(body={"minutes": 0}))
+        assert json.loads(resp.text)["auto_lock_minutes"] == 0
+        await server._handle_auth_autolock(JsonRequest(body={"minutes": 30}))
+        server.auth.disable()
+        assert load_credentials().web.auto_lock_minutes == 0
+
+    asyncio.run(go())

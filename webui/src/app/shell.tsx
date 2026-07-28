@@ -1,6 +1,6 @@
 // App shell: focused navigation plus the shared Activity center.
 
-import { ReactNode, useState } from 'react'
+import { ReactNode, useEffect, useState } from 'react'
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, Notification } from '../lib/api'
@@ -39,7 +39,7 @@ function navColors(active: boolean) {
 export function useConsoleLock() {
   const { data } = useQuery({
     queryKey: ['auth-status'],
-    queryFn: () => api.get<{ protected: boolean }>('/api/auth/status'),
+    queryFn: () => api.get<{ protected: boolean; auto_lock_minutes?: number }>('/api/auth/status'),
     staleTime: 60_000,
   })
   const lock = async () => {
@@ -49,7 +49,49 @@ export function useConsoleLock() {
       location.reload()
     }
   }
-  return { protected: !!data?.protected, lock }
+  return {
+    protected: !!data?.protected,
+    autoLockMinutes: data?.protected ? data?.auto_lock_minutes || 0 : 0,
+    lock,
+  }
+}
+
+// Locks the console after N minutes without user input (Settings → Security).
+export function AutoLockWatcher() {
+  const { autoLockMinutes, lock } = useConsoleLock()
+
+  useEffect(() => {
+    if (!autoLockMinutes) return
+    let lastActivity = Date.now()
+    let locking = false
+    const bump = () => {
+      lastActivity = Date.now()
+    }
+    const expired = () => Date.now() - lastActivity >= autoLockMinutes * 60_000
+    const check = () => {
+      if (!locking && expired()) {
+        locking = true
+        void lock()
+      }
+    }
+    // Returning to a long-hidden tab must lock, not count as activity.
+    const onVisibility = () => {
+      if (document.hidden) return
+      if (expired()) check()
+      else bump()
+    }
+    const events = ['pointerdown', 'pointermove', 'keydown', 'wheel', 'touchstart'] as const
+    events.forEach((name) => window.addEventListener(name, bump, { passive: true }))
+    document.addEventListener('visibilitychange', onVisibility)
+    const timer = window.setInterval(check, 15_000)
+    return () => {
+      events.forEach((name) => window.removeEventListener(name, bump))
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.clearInterval(timer)
+    }
+  }, [autoLockMinutes])
+
+  return null
 }
 
 export function Sidebar({ version }: { version: string }) {

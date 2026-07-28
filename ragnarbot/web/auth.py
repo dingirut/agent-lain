@@ -74,6 +74,7 @@ class WebAuth:
     def __init__(self) -> None:
         self.password_hash = ""
         self.session_secret = ""
+        self.auto_lock_minutes = 0
         self._failures: dict[str, list[float]] = {}
         self.reload()
 
@@ -86,6 +87,7 @@ class WebAuth:
         web_creds = getattr(creds, "web", None)
         self.password_hash = getattr(web_creds, "password_hash", "") if web_creds else ""
         self.session_secret = getattr(web_creds, "session_secret", "") if web_creds else ""
+        self.auto_lock_minutes = getattr(web_creds, "auto_lock_minutes", 0) if web_creds else 0
 
     def _persist(self) -> None:
         from ragnarbot.auth.credentials import load_credentials, save_credentials
@@ -93,6 +95,7 @@ class WebAuth:
         creds = load_credentials()
         creds.web.password_hash = self.password_hash
         creds.web.session_secret = self.session_secret
+        creds.web.auto_lock_minutes = self.auto_lock_minutes
         save_credentials(creds)
 
     # ── state changes ────────────────────────────────────────────
@@ -110,6 +113,11 @@ class WebAuth:
     def disable(self) -> None:
         self.password_hash = ""
         self.session_secret = ""
+        self.auto_lock_minutes = 0
+        self._persist()
+
+    def set_auto_lock(self, minutes: int) -> None:
+        self.auto_lock_minutes = minutes
         self._persist()
 
     # ── request checks ───────────────────────────────────────────

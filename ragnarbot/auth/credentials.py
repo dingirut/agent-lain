@@ -49,6 +49,7 @@ class WebCredential(BaseModel):
     """Web console password protection (managed via /api/auth, not secrets)."""
     password_hash: str = ""
     session_secret: str = ""
+    auto_lock_minutes: int = 0  # 0 = no idle auto-lock
 
 
 class Credentials(BaseModel):

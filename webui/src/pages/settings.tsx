@@ -516,7 +516,8 @@ function SecuritySection() {
   const qc = useQueryClient()
   const { data: auth } = useQuery({
     queryKey: ['auth-status'],
-    queryFn: () => api.get<{ protected: boolean }>('/api/auth/status'),
+    queryFn: () =>
+      api.get<{ protected: boolean; auto_lock_minutes?: number }>('/api/auth/status'),
   })
   const [current, setCurrent] = useState('')
   const [next, setNext] = useState('')
@@ -524,6 +525,7 @@ function SecuritySection() {
   const [confirmDisable, setConfirmDisable] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [autoLock, setAutoLock] = useState<string | null>(null)
 
   const reset = () => {
     setCurrent('')
@@ -550,9 +552,31 @@ function SecuritySection() {
     },
   })
 
+  const saveAutoLock = useMutation({
+    mutationFn: (minutes: number) => api.post('/api/auth/autolock', { minutes }),
+    onSuccess: (_data, minutes) => {
+      setAutoLock(null)
+      setError(null)
+      setNotice(
+        minutes > 0
+          ? `Auto-lock after ${minutes} min of inactivity.`
+          : 'Auto-lock disabled.',
+      )
+      qc.invalidateQueries({ queryKey: ['auth-status'] })
+    },
+    onError: (e) => {
+      setNotice(null)
+      setError((e as ApiError)?.message ?? 'Something went wrong.')
+    },
+  })
+
   if (!auth) return <Skeleton className="w-1/2" />
   const enabled = auth.protected
   const mismatch = next.length > 0 && confirm.length > 0 && next !== confirm
+  const storedAutoLock = auth.auto_lock_minutes || 0
+  const autoLockValue = autoLock ?? String(storedAutoLock)
+  const autoLockParsed = /^\d+$/.test(autoLockValue.trim()) ? Number(autoLockValue.trim()) : null
+  const autoLockValid = autoLockParsed !== null && autoLockParsed <= 1440
 
   return (
     <div className="space-y-3">
@@ -637,6 +661,33 @@ function SecuritySection() {
             </Button>
           )}
         </div>
+        {enabled && (
+          <div className="space-y-1.5 border-t border-line pt-3">
+            <div className="text-[12px] font-semibold text-ink">Auto-lock</div>
+            <p className="text-[11px] leading-relaxed text-soft">
+              Lock this browser after a period of inactivity. 0 disables auto-lock.
+            </p>
+            <div className="flex items-center gap-2">
+              <TextInput
+                inputMode="numeric"
+                aria-label="Auto-lock minutes"
+                value={autoLockValue}
+                error={!autoLockValid}
+                onChange={(e) => setAutoLock(e.target.value)}
+                className="w-[72px] font-mono"
+              />
+              <span className="text-[11px] text-soft">minutes</span>
+              <Button
+                variant="secondary"
+                loading={saveAutoLock.isPending}
+                disabled={!autoLockValid || autoLockParsed === storedAutoLock}
+                onClick={() => autoLockValid && saveAutoLock.mutate(autoLockParsed)}
+              >
+                Save
+              </Button>
+            </div>
+          </div>
+        )}
         {notice && <div className="text-[11px] text-ok">{notice}</div>}
         {error && <div className="text-[11px] text-err">{error}</div>}
       </Card>

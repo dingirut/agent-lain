@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { connectWs, useChat } from './lib/ws'
 import { initTheme } from './app/theme'
 import {
+  AutoLockWatcher,
   DesktopBell,
   MobileHeader,
   MoreSheet,
@@ -95,6 +96,7 @@ export default function App() {
 
   return (
     <QueryClientProvider client={queryClient}>
+      <AutoLockWatcher />
       <div className="flex h-dvh flex-col bg-page lg:flex-row">
         <Sidebar version={version} />
         <MobileHeader

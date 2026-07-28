@@ -207,6 +207,7 @@ class WebServer:
         r.add_post("/api/auth/login", self._handle_auth_login)
         r.add_post("/api/auth/logout", self._handle_auth_logout)
         r.add_post("/api/auth/password", self._handle_auth_password)
+        r.add_post("/api/auth/autolock", self._handle_auth_autolock)
 
         ApiRoutes(self).register(r)
 
@@ -294,6 +295,7 @@ class WebServer:
         return web.json_response({
             "protected": self.auth.enabled,
             "authenticated": not self.auth.enabled or self.auth.authenticated(request),
+            "auto_lock_minutes": self.auth.auto_lock_minutes,
         })
 
     async def _handle_auth_login(self, request: web.Request) -> web.Response:
@@ -347,6 +349,20 @@ class WebServer:
         response = web.json_response({"ok": True, "protected": True})
         self.auth.issue_cookie(response)
         return response
+
+    async def _handle_auth_autolock(self, request: web.Request) -> web.Response:
+        """Set the idle auto-lock timeout (minutes, 0 disables)."""
+        if not self.auth.enabled:
+            return web.json_response({"error": "protection is not enabled"}, status=400)
+        body = await request.json()
+        try:
+            minutes = int(body.get("minutes", 0))
+        except (TypeError, ValueError):
+            return web.json_response({"error": "minutes must be a number"}, status=400)
+        if not 0 <= minutes <= 24 * 60:
+            return web.json_response({"error": "minutes must be between 0 and 1440"}, status=400)
+        self.auth.set_auto_lock(minutes)
+        return web.json_response({"ok": True, "auto_lock_minutes": minutes})
 
     # ── REST: uploads / voice / media ────────────────────────────
 
