@@ -364,6 +364,14 @@ class ConfigTool(Tool):
             agent.context.experimental_soul = agent.experimental_soul
             return "Experimental soul updated."
 
+        if path == "agents.defaults.pi_mode":
+            agent.pi_mode = (
+                bool(value) if isinstance(value, bool)
+                else str(value).lower() in ("true", "1")
+            )
+            agent.context.pi_mode = agent.pi_mode
+            return "Pi mode updated."
+
         if path in ("tools.web.search.engine", "tools.web.search.max_results"):
             return self._reload_web_search()
 

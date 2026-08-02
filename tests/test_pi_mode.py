@@ -148,3 +148,19 @@ def test_pi_prompt_keeps_isolated_run_rules(tmp_path):
         session_metadata={"cron_isolated": {"job_name": "digest"}}, channel="cli",
     )
     assert "CRON RULES for digest" in prompt
+
+
+# ── hot toggling ─────────────────────────────────────────────────
+
+def test_toggling_pi_mode_applies_without_restart():
+    """The Settings toggle must reach the live agent, not just config.json."""
+    from ragnarbot.agent.tools.config_tool import ConfigTool
+
+    agent = SimpleNamespace(pi_mode=False, context=SimpleNamespace(pi_mode=False))
+    tool = ConfigTool(agent)
+
+    assert tool._apply_hot_reload("agents.defaults.pi_mode", True) == "Pi mode updated."
+    assert agent.pi_mode is True and agent.context.pi_mode is True
+
+    tool._apply_hot_reload("agents.defaults.pi_mode", "false")
+    assert agent.pi_mode is False and agent.context.pi_mode is False
