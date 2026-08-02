@@ -11,7 +11,10 @@ from aiohttp import web
 
 from ragnarbot import __version__
 
-_WEB_CONFIG_PATHS = frozenset({"agents.defaults.experimental_soul"})
+_WEB_CONFIG_PATHS = frozenset({
+    "agents.defaults.experimental_soul",
+    "agents.defaults.pi_mode",
+})
 _WORKSPACE_TEXT_SUFFIXES = frozenset({
     ".cfg", ".conf", ".css", ".csv", ".html", ".ini", ".js", ".json",
     ".jsx", ".md", ".py", ".sh", ".skill", ".sql", ".toml", ".ts",

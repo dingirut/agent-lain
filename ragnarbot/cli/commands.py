@@ -408,6 +408,7 @@ def gateway_main(
             trace_mode=config.agents.defaults.trace_mode,
             steering_enabled=config.agents.defaults.steering_enabled,
             experimental_soul=config.agents.defaults.experimental_soul,
+            pi_mode=config.agents.defaults.pi_mode,
             heartbeat_interval_m=config.heartbeat.interval_m,
             fallback_model=fallback_config.model,
             fallback_config=fallback_config,

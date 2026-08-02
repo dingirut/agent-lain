@@ -128,6 +128,13 @@ class AgentDefaults(BaseModel):
         default=False,
         json_schema_extra={"reload": "hot", "label": "Use experimental soul prompt"},
     )
+    pi_mode: bool = Field(
+        default=False,
+        json_schema_extra={
+            "reload": "hot",
+            "label": "Pi mode: minimal system prompt for small/slow local models",
+        },
+    )
 
 
 class FallbackConfig(BaseModel):

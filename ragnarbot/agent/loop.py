@@ -212,6 +212,7 @@ class AgentLoop:
         trace_mode: bool = False,
         steering_enabled: bool = True,
         experimental_soul: bool = False,
+        pi_mode: bool = False,
         browser_config: "BrowserConfig | None" = None,
         recall_config: "RecallToolConfig | None" = None,
     ):
@@ -238,6 +239,7 @@ class AgentLoop:
         self.trace_mode = trace_mode
         self.steering_enabled = steering_enabled
         self.experimental_soul = experimental_soul
+        self.pi_mode = pi_mode
         self.cache_manager = CacheManager(max_context_tokens=max_context_tokens)
 
         # Fallback model support
@@ -259,6 +261,7 @@ class AgentLoop:
         self.context = ContextBuilder(workspace, heartbeat_interval_m=heartbeat_interval_m)
         self.context.model = self.model
         self.context.experimental_soul = self.experimental_soul
+        self.context.pi_mode = self.pi_mode
         self.sessions = SessionManager(workspace)
         self._session_locks: dict[str, asyncio.Lock] = {}
         from ragnarbot.agent.index.manager import IndexManager
@@ -312,6 +315,8 @@ class AgentLoop:
         self._processing_session_key: str | None = None
         self.last_active_chat: tuple[str, str] | None = None
         self._register_default_tools()
+        # Pi mode lists the live tool set in the prompt (see ContextBuilder)
+        self.context.tool_snippets_provider = self.tools.prompt_snippets
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""

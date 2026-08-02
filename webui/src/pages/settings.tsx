@@ -85,7 +85,7 @@ export default function SettingsPage() {
     if (id === 'secrets') return <SecretsSection data={secrets} qc={qc} />
     if (id === 'security') return <SecuritySection />
     if (id === 'appearance') return <AppearanceSection />
-    if (id === 'experimental') return <SoulSection field={config?.[0]} />
+    if (id === 'experimental') return <ExperimentalSection fields={config} />
     if (id === 'integrations') return <IntegrationsSection onOpenHooks={() => navigate('/hooks')} />
     if (id === 'system') return <SystemSection />
     if (id === 'diagnostics') return <DiagnosticsSection />
@@ -158,15 +158,21 @@ export default function SettingsPage() {
 
 // ── deep settings ─────────────────────────────────────────────
 
-function SoulSection({ field }: { field?: SoulConfigField }) {
+function ConfigToggle({
+  field,
+  path,
+  title,
+  description,
+}: {
+  field?: SoulConfigField
+  path: string
+  title: string
+  description: string
+}) {
   const qc = useQueryClient()
   const [optimistic, setOptimistic] = useState<boolean | null>(null)
   const update = useMutation({
-    mutationFn: (value: boolean) =>
-      api.patch('/api/config', {
-        path: 'agents.defaults.experimental_soul',
-        value: String(value),
-      }),
+    mutationFn: (value: boolean) => api.patch('/api/config', { path, value: String(value) }),
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ['config-schema'] })
       setOptimistic(null)
@@ -178,14 +184,14 @@ function SoulSection({ field }: { field?: SoulConfigField }) {
   return (
     <Card className="flex items-center gap-3">
       <div className="min-w-0 flex-1">
-        <div className="text-[13px] font-semibold text-ink">Soul</div>
-        <div className="mt-1 text-[11px] leading-relaxed text-soft">
-          Apply the experimental soul prompt to the agent globally.
-        </div>
-        {update.isError && <div className="mt-2 text-[10.5px] text-err">Could not update Soul.</div>}
+        <div className="text-[13px] font-semibold text-ink">{title}</div>
+        <div className="mt-1 text-[11px] leading-relaxed text-soft">{description}</div>
+        {update.isError && (
+          <div className="mt-2 text-[10.5px] text-err">Could not update {title}.</div>
+        )}
       </div>
       <Toggle
-        label="Soul"
+        label={title}
         value={enabled}
         disabled={update.isPending}
         onChange={(value) => {
@@ -194,6 +200,31 @@ function SoulSection({ field }: { field?: SoulConfigField }) {
         }}
       />
     </Card>
+  )
+}
+
+function ExperimentalSection({ fields }: { fields?: SoulConfigField[] }) {
+  const find = (path: string) => fields?.find((f) => f.path === path)
+  return (
+    <div className="space-y-3">
+      <ConfigToggle
+        field={find('agents.defaults.pi_mode')}
+        path="agents.defaults.pi_mode"
+        title="Pi mode"
+        description={
+          'Minimal system prompt: identity, a one-line tool list, and the skills ' +
+          'catalogue — protocol manuals stay on disk and are read on demand. ' +
+          'Cuts the starting context by roughly 20k tokens, for small or slow ' +
+          'local models with a narrow window.'
+        }
+      />
+      <ConfigToggle
+        field={find('agents.defaults.experimental_soul')}
+        path="agents.defaults.experimental_soul"
+        title="Soul"
+        description="Apply the experimental soul prompt to the agent globally. Ignored in Pi mode."
+      />
+    </div>
   )
 }
 

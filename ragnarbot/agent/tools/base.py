@@ -38,6 +38,37 @@ class Tool(ABC):
     def parameters(self) -> dict[str, Any]:
         """JSON Schema for tool parameters."""
         pass
+
+    # Abbreviations whose dot must not be read as a sentence boundary.
+    _SNIPPET_ABBREVIATIONS = ("e.g", "i.e", "etc", "vs", "approx")
+    _SNIPPET_MAX_CHARS = 90
+
+    @property
+    def prompt_snippet(self) -> str:
+        """One-line summary for the system prompt's tool list.
+
+        The full ``description`` already reaches the model inside the tool
+        schema, so the prompt only needs a hint that the tool exists. Tools
+        override this when the first sentence is a poor summary.
+        """
+        text = " ".join((self.description or "").split())
+        sentence = text
+        start = 0
+        while True:
+            dot = text.find(". ", start)
+            if dot == -1:
+                break
+            head = text[:dot]
+            if any(head.endswith(a) for a in self._SNIPPET_ABBREVIATIONS):
+                start = dot + 2
+                continue
+            sentence = head
+            break
+        sentence = sentence.strip().rstrip(".")
+        if len(sentence) > self._SNIPPET_MAX_CHARS:
+            cut = sentence.rfind(" ", 0, self._SNIPPET_MAX_CHARS)
+            sentence = sentence[: cut if cut > 0 else self._SNIPPET_MAX_CHARS].rstrip(" ,;:") + "…"
+        return sentence
     
     @abstractmethod
     async def execute(self, **kwargs: Any) -> str | list[dict[str, Any]]:

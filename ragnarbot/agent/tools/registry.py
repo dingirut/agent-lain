@@ -34,6 +34,10 @@ class ToolRegistry:
     def get_definitions(self) -> list[dict[str, Any]]:
         """Get all tool definitions in OpenAI format."""
         return [tool.to_schema() for tool in self._tools.values()]
+
+    def prompt_snippets(self) -> list[tuple[str, str]]:
+        """(name, one-line summary) for every registered tool."""
+        return [(tool.name, tool.prompt_snippet) for tool in self._tools.values()]
     
     async def execute(self, name: str, params: dict[str, Any]) -> str:
         """

@@ -32,6 +32,12 @@ class ContextBuilder:
         self.heartbeat_interval_m = heartbeat_interval_m
         self.model: str | None = None  # Set by AgentLoop for vision checks
         self.experimental_soul: bool = False  # Set by AgentLoop for soul switching
+        # Minimal-prompt mode for small/slow models (see _build_pi_system_prompt).
+        # Set by AgentLoop from config.
+        self.pi_mode: bool = False
+        # Returns [(tool_name, one-line summary)] — supplied by AgentLoop so the
+        # minimal prompt lists exactly the tools that are actually registered.
+        self.tool_snippets_provider: Any = None
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace)
         self.agents = AgentsLoader(workspace)
@@ -52,6 +58,9 @@ class ContextBuilder:
         Returns:
             Complete system prompt.
         """
+        if self.pi_mode:
+            return self._build_pi_system_prompt(session_metadata, channel)
+
         parts = []
 
         # 1. Minimal identity header (dynamic values)
@@ -131,6 +140,108 @@ The following agent types are available for delegation via the agent tools.
 Use `agent_spawn` to start a task with a specific agent type, or omit the agent parameter for general-purpose execution.
 
 {agents_summary}""")
+
+        return "\n\n---\n\n".join(parts)
+
+    def _build_pi_system_prompt(
+        self, session_metadata: dict | None = None, channel: str | None = None,
+    ) -> str:
+        """Build the minimal system prompt ("pi mode").
+
+        Small or slow local models do worse with long protocol documents than
+        without them: the window is narrow and every extra instruction is
+        another thing to get confused by. This keeps only what a model cannot
+        infer on its own — who it is, where it works, which tools exist, and
+        where to find deeper instructions when a task needs them.
+
+        Tools are listed as one-liners because the full descriptions already
+        reach the model in the tool schemas; skills as a catalogue because the
+        model loads their content on demand. Everything else (protocol manuals,
+        long-term memory, prose duplicating the schemas) is left out — it is
+        reachable through `file_read` and `recall` when actually needed.
+        """
+        import time
+
+        tz_name = time.tzname[time.daylight] if time.daylight else time.tzname[0]
+        utc_offset = time.strftime("%z")
+        workspace_path = str(self.workspace.expanduser().resolve())
+        parts: list[str] = []
+
+        identity_file = self.workspace / "IDENTITY.md"
+        identity_body = ""
+        if identity_file.exists():
+            identity_body = identity_file.read_text(encoding="utf-8").strip()
+
+        header = [
+            f"You are {runtime_name()}, a personal assistant with tool access.",
+            "",
+            f"Workspace: {workspace_path}",
+            f"Timezone: {tz_name} (UTC{utc_offset[:3]}:{utc_offset[3:]})",
+        ]
+        if channel:
+            header.append(f"Channel: {channel}")
+        parts.append("\n".join(header))
+
+        if identity_body:
+            parts.append(identity_body)
+
+        snippets = []
+        if self.tool_snippets_provider is not None:
+            try:
+                snippets = list(self.tool_snippets_provider())
+            except Exception:
+                snippets = []
+        if snippets:
+            lines = ["## Tools", ""]
+            lines += [f"- {name}: {summary}" for name, summary in snippets if summary]
+            lines.append("")
+            lines.append(
+                "Parameters are in each tool's schema — call tools directly "
+                "instead of describing what you would do."
+            )
+            parts.append("\n".join(lines))
+
+        skills_summary = self.skills.build_skills_summary()
+        if skills_summary:
+            parts.append(
+                "## Skills\n\n"
+                "Instructions for specific tasks. When one matches, read its "
+                "`<location>` with file_read before starting.\n\n"
+                f"{skills_summary}"
+            )
+
+        agents_summary = self.agents.build_agents_summary()
+        if agents_summary:
+            parts.append(
+                "## Agents\n\n"
+                "Delegate background work with the agent tool.\n\n"
+                f"{agents_summary}"
+            )
+
+        notes = [
+            "## Notes",
+            "",
+            f"- Detailed operating protocols: {BUILTIN_DIR / 'AGENTS.md'} "
+            "(read only if a task needs them).",
+            "- Past conversations and long-term notes: use `recall`.",
+        ]
+        memory_index = self.workspace / "memory" / "MEMORY.md"
+        if memory_index.exists():
+            notes.append(f"- Long-term memory index: {memory_index}")
+        notes.append("- Be concise. Do the work, then report what you did.")
+        parts.append("\n".join(notes))
+
+        # Isolated runs (cron/heartbeat/hook) carry their own execution rules —
+        # they replace the chat framing entirely and stay even in pi mode.
+        for key, loader in (
+            ("cron_isolated", self._load_builtin_cron_isolated),
+            ("heartbeat_isolated", self._load_builtin_heartbeat_isolated),
+            ("hook_isolated", self._load_builtin_hook_isolated),
+        ):
+            if session_metadata and session_metadata.get(key):
+                extra = loader(session_metadata[key])
+                if extra:
+                    parts.append(extra)
 
         return "\n\n---\n\n".join(parts)
 
